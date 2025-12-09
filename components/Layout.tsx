@@ -49,9 +49,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
       >
         <div className="p-6 pb-2">
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center text-pink-500 shrink-0">
-              <i className="fa-regular fa-square-check text-xl"></i>
-            </div>
+            <img src="/favicon.png" alt="Logo" className="w-12 h-12 object-contain shrink-0 drop-shadow-sm" />
             <div>
               <h1 className="font-bold text-lg leading-tight text-gray-800">Classroom<br />Management</h1>
               {schoolSettings && (
@@ -64,7 +62,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
           </div>
           <div className="flex items-center gap-3 mb-6 px-2">
             <img
-              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatar || user.username}`}
+              src={user.avatar?.startsWith('http') ? user.avatar : `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.avatar || user.username}`}
               alt="Avatar"
               className="w-10 h-10 rounded-full border border-gray-200 bg-gray-50"
             />
@@ -109,7 +107,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
             <i className="fa-solid fa-bars text-xl"></i>
           </button>
           <div className="flex items-center gap-2">
-            <i className="fa-solid fa-school text-pink-500"></i>
+            <img src="/favicon.png" alt="Logo" className="w-8 h-8 object-contain" />
             <span className="font-bold text-lg">Classroom</span>
           </div>
         </header>

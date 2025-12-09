@@ -55,7 +55,21 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
     const [newPassword, setNewPassword] = useState('');
     const [selectedAvatar, setSelectedAvatar] = useState(user.avatar || user.username);
 
-    const avatarSeeds = ['Felix', 'Aneka', 'Zoe', 'Jack', 'Sam', 'Molly', 'Coco', 'Bubba', 'Misty', 'Willow', 'Bear', 'Tiger'];
+    // Thai Teacher Style Avatars (light skin, smiling)
+    const TEACHER_AVATARS = [
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher1&skinColor=ffdbb4&eyes=happy&mouth=smile&backgroundColor=b6e3f4`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher2&skinColor=f8d25c&eyes=happy&mouth=smile&backgroundColor=ffdfbf`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher3&skinColor=ffdbb4&eyes=happy&mouth=twinkle&backgroundColor=d1d4f9`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher4&skinColor=f8d25c&eyes=happy&mouth=smile&backgroundColor=ffd5dc`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher5&skinColor=ffdbb4&eyes=wink&mouth=smile&backgroundColor=c0aede`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=ThaiTeacher6&skinColor=f8d25c&eyes=happy&mouth=smile&backgroundColor=ffdfbf`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=KruMale1&skinColor=ffdbb4&eyes=happy&mouth=smile&backgroundColor=b6e3f4`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=KruFemale1&skinColor=f8d25c&eyes=happy&mouth=twinkle&backgroundColor=ffd5dc`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=KruMale2&skinColor=ffdbb4&eyes=wink&mouth=smile&backgroundColor=c0aede`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=KruFemale2&skinColor=f8d25c&eyes=happy&mouth=smile&backgroundColor=ffdfbf`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=AjarnMale&skinColor=ffdbb4&eyes=happy&mouth=smile&backgroundColor=d1d4f9`,
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=AjarnFemale&skinColor=f8d25c&eyes=happy&mouth=twinkle&backgroundColor=b6e3f4`,
+    ];
 
     const handleSaveProfile = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -187,32 +201,30 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
                             <h3 className="text-xl font-bold text-gray-800 mb-6 pb-4 border-b border-gray-100">ข้อมูลบัญชีผู้ใช้</h3>
                             <form onSubmit={handleSaveProfile} className="space-y-6 max-w-lg">
                                 <div className="mb-6">
-                                    <div className="text-sm font-medium text-gray-700 mb-3">เลือกรูปโปรไฟล์</div>
-                                    <div className="flex flex-wrap gap-3">
-                                        {avatarSeeds.map(seed => (
+                                    <div className="text-sm font-medium text-gray-700 mb-4">เลือกตัวละคร (Thai Teacher Style)</div>
+                                    <div className="flex flex-wrap gap-4">
+                                        {TEACHER_AVATARS.map((avatarUrl, index) => (
                                             <button
-                                                key={seed}
+                                                key={index}
                                                 type="button"
-                                                onClick={() => setSelectedAvatar(seed)}
-                                                className={`p-1 rounded-full border-2 transition-all ${selectedAvatar === seed ? 'border-pink-500 scale-110 shadow-md' : 'border-transparent hover:border-pink-200'}`}
+                                                onClick={() => setSelectedAvatar(avatarUrl)}
+                                                className={`relative w-16 h-16 rounded-full overflow-hidden border-4 transition-all ${selectedAvatar === avatarUrl
+                                                    ? 'border-pink-500 scale-110 shadow-lg'
+                                                    : 'border-white hover:border-pink-200 hover:scale-105 shadow-sm'
+                                                    }`}
                                             >
                                                 <img
-                                                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`}
-                                                    alt={seed}
-                                                    className="w-12 h-12 rounded-full bg-gray-50"
+                                                    src={avatarUrl}
+                                                    alt={`Avatar ${index + 1}`}
+                                                    className="w-full h-full object-cover bg-gray-50"
                                                 />
+                                                {selectedAvatar === avatarUrl && (
+                                                    <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
+                                                        <i className="fa-solid fa-check text-white drop-shadow-md"></i>
+                                                    </div>
+                                                )}
                                             </button>
                                         ))}
-                                    </div>
-                                    <div className="mt-4 flex items-center gap-4">
-                                        <img
-                                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedAvatar}`}
-                                            alt="Selected Avatar"
-                                            className="w-20 h-20 rounded-full border-2 border-pink-100 bg-gray-50 shadow-sm"
-                                        />
-                                        <div className="text-sm text-gray-500">
-                                            รูปโปรไฟล์ที่เลือก
-                                        </div>
                                     </div>
                                 </div>
 

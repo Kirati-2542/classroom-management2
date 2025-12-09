@@ -9,8 +9,8 @@ interface LoginProps {
 
 const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
   const [activeTab, setActiveTab] = useState<'teacher' | 'parent'>('teacher');
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('1234');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [studentId, setStudentId] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [error, setError] = useState('');
@@ -45,7 +45,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
             <h1 className="text-4xl font-bold mb-2">Classroom<br />Management</h1>
             <p className="text-pink-100">ระบบบริหารจัดการชั้นเรียน</p>
           </div>
-          <div className="relative z-10 text-center text-6xl">🏫</div>
+          <div className="relative z-10 flex justify-center mb-6">
+            <img src="/favicon.png" alt="School Icon" className="w-32 h-32 object-contain drop-shadow-xl" />
+          </div>
           <div className="relative z-10 text-xs text-pink-200 text-center">&copy; 2025 School System</div>
         </div>
 
@@ -128,7 +130,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
               </button>
             </form>
           )}
-          
+
           <div className="text-center mt-4 text-sm text-red-500 font-bold min-h-[24px]">
             {error}
           </div>
