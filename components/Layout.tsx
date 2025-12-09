@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import ErrorBoundary from './ErrorBoundary';
+import logo from '../src/assets/logo.png';
 
 interface LayoutProps {
   user: User;
@@ -49,7 +50,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
       >
         <div className="p-6 pb-2">
           <div className="flex items-center gap-3 mb-8">
-            <img src="/favicon.png" alt="Logo" className="w-12 h-12 object-contain shrink-0 drop-shadow-sm" />
+            <img src={logo} alt="Logo" className="w-12 h-12 object-contain shrink-0 drop-shadow-sm" />
             <div>
               <h1 className="font-bold text-lg leading-tight text-gray-800">Classroom<br />Management</h1>
               {schoolSettings && (
@@ -107,7 +108,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
             <i className="fa-solid fa-bars text-xl"></i>
           </button>
           <div className="flex items-center gap-2">
-            <img src="/favicon.png" alt="Logo" className="w-8 h-8 object-contain" />
+            <img src={logo} alt="Logo" className="w-8 h-8 object-contain" />
             <span className="font-bold text-lg">Classroom</span>
           </div>
         </header>

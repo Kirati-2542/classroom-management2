@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
 import { User } from '../types';
+import logo from '../src/assets/logo.png';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -46,7 +47,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
             <p className="text-pink-100">ระบบบริหารจัดการชั้นเรียน</p>
           </div>
           <div className="relative z-10 flex justify-center mb-6">
-            <img src="/favicon.png" alt="School Icon" className="w-32 h-32 object-contain drop-shadow-xl" />
+            <img src={logo} alt="School Icon" className="w-32 h-32 object-contain drop-shadow-xl" />
           </div>
           <div className="relative z-10 text-xs text-pink-200 text-center">&copy; 2025 School System</div>
         </div>
