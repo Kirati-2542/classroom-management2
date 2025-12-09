@@ -110,35 +110,117 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      // Generate CSV
-      // Headers
-      const headers = ["No", "Student ID", "Name", ...data.dates.map(d => formatDisplayDate(d))];
+      // Calculate statistics for each student
+      const calculateStats = (statuses: string[]) => {
+        const stats = { present: 0, absent: 0, late: 0, sick: 0, leave: 0 };
+        statuses.forEach(s => {
+          if (s === 'present') stats.present++;
+          else if (s === 'absent') stats.absent++;
+          else if (s === 'late') stats.late++;
+          else if (s === 'sick') stats.sick++;
+          else if (s === 'leave') stats.leave++;
+        });
+        return stats;
+      };
 
-      // Rows
-      const rows = data.students.map((s: any) => [
-        s.no,
-        s.id,
-        s.name,
-        ...s.statuses.map((st: string) => {
-          if (st === 'present') return 'มา';
-          if (st === 'absent') return 'ขาด';
-          if (st === 'late') return 'สาย';
-          if (st === 'sick') return 'ป่วย';
-          if (st === 'leave') return 'ลา';
-          return '-';
-        })
-      ]);
+      // Generate CSV with complete data
+      // Header Info Section
+      const infoSection = [
+        [`รายงานการเข้าเรียน`],
+        [`ห้องเรียน: ${cls?.name || 'N/A'}`],
+        [`วิชา: ${subject}`],
+        [`ช่วงวันที่: ${formatDisplayDate(exportStartDate)} ถึง ${formatDisplayDate(exportEndDate)}`],
+        [`วันที่ส่งออก: ${formatDisplayDate(new Date().toISOString().split('T')[0])}`],
+        [] // Empty row for separation
+      ];
 
+      // Data Headers
+      const headers = [
+        "ลำดับ",
+        "รหัสนักเรียน",
+        "ชื่อ-นามสกุล",
+        ...data.dates.map((d: string) => formatDisplayDate(d)),
+        "มาเรียน",
+        "ขาด",
+        "สาย",
+        "ป่วย",
+        "ลา",
+        "อัตราการมาเรียน (%)"
+      ];
+
+      // Data Rows with statistics
+      const rows = data.students.map((s: any, index: number) => {
+        const stats = calculateStats(s.statuses);
+        const totalDays = s.statuses.length;
+        const attendanceRate = totalDays > 0 ? ((stats.present + stats.late) / totalDays * 100).toFixed(1) : '0.0';
+
+        return [
+          index + 1,
+          s.id,
+          s.name,
+          ...s.statuses.map((st: string) => {
+            if (st === 'present') return 'มา';
+            if (st === 'absent') return 'ขาด';
+            if (st === 'late') return 'สาย';
+            if (st === 'sick') return 'ป่วย';
+            if (st === 'leave') return 'ลา';
+            return '-';
+          }),
+          stats.present,
+          stats.absent,
+          stats.late,
+          stats.sick,
+          stats.leave,
+          attendanceRate
+        ];
+      });
+
+      // Summary Row
+      const totalStats = {
+        present: 0,
+        absent: 0,
+        late: 0,
+        sick: 0,
+        leave: 0
+      };
+      data.students.forEach((s: any) => {
+        const stats = calculateStats(s.statuses);
+        totalStats.present += stats.present;
+        totalStats.absent += stats.absent;
+        totalStats.late += stats.late;
+        totalStats.sick += stats.sick;
+        totalStats.leave += stats.leave;
+      });
+      const totalDaysAll = data.students.length * data.dates.length;
+      const overallRate = totalDaysAll > 0 ? ((totalStats.present + totalStats.late) / totalDaysAll * 100).toFixed(1) : '0.0';
+
+      const summaryRow = [
+        '',
+        '',
+        'รวมทั้งหมด',
+        ...data.dates.map(() => ''),
+        totalStats.present,
+        totalStats.absent,
+        totalStats.late,
+        totalStats.sick,
+        totalStats.leave,
+        overallRate
+      ];
+
+      // Build CSV content
       const csvContent = [
-        headers.join(","),
-        ...rows.map(r => r.map((c: any) => `"${c}"`).join(","))
+        ...infoSection.map(row => row.join(',')),
+        headers.map(h => `"${h}"`).join(','),
+        ...rows.map(r => r.map((c: any) => `"${c}"`).join(',')),
+        [], // Empty row before summary
+        summaryRow.map((c: any) => `"${c}"`).join(',')
       ].join("\n");
 
       const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `attendance_export_${cls?.name}_${exportStartDate}_to_${exportEndDate}.csv`);
+      link.setAttribute("download", `รายงานการเข้าเรียน_${cls?.name}_${exportStartDate}_ถึง_${exportEndDate}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
