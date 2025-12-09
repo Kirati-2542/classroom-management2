@@ -1,6 +1,7 @@
 
 import { Classroom, Student, User, Assignment, Grade } from '../types';
 import { googleSheetsService } from './googleSheets';
+import { normalizeDate } from '../utils/dateUtils';
 
 // Cache for performance (optional, but good for reducing API calls)
 let classrooms: Classroom[] = [];
@@ -84,7 +85,11 @@ export const api = {
   getClassrooms: async (): Promise<Classroom[]> => {
     if (initPromise) await initPromise;
     await delay(500);
-    return classrooms;
+    // Calculate student count dynamically to ensure accuracy
+    return classrooms.map(c => ({
+      ...c,
+      studentCount: students.filter(s => s.classId === c.id).length
+    }));
   },
 
   addClassroom: async (classroom: Omit<Classroom, 'id'>): Promise<Classroom> => {
@@ -99,7 +104,12 @@ export const api = {
   updateClassroom: async (id: string, data: Partial<Classroom>): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(500);
-    classrooms = classrooms.map(c => c.id === id ? { ...c, ...data } : c);
+    const existing = classrooms.find(c => c.id === id);
+    if (existing) {
+      const updated = { ...existing, ...data };
+      await googleSheetsService.updateClassroom(updated);
+      classrooms = classrooms.map(c => c.id === id ? updated : c);
+    }
   },
 
   deleteClassroom: async (id: string): Promise<void> => {
@@ -109,8 +119,18 @@ export const api = {
     classrooms = classrooms.filter(c => c.id !== id);
   },
 
-  getStudentsByClass: async (classId: string): Promise<Student[]> => {
+  getStudentsByClass: async (classId: string, forceRefresh: boolean = false): Promise<Student[]> => {
     if (initPromise) await initPromise;
+    if (forceRefresh) {
+      const freshStudents = await googleSheetsService.getStudents();
+      students = freshStudents; // Update cache
+
+      // Also update student counts for all classrooms based on fresh data
+      classrooms = classrooms.map(c => ({
+        ...c,
+        studentCount: students.filter(s => s.classId === c.id).length
+      }));
+    }
     await delay(500);
     if (!classId) return students;
     return students.filter(s => s.classId === classId);
@@ -128,7 +148,10 @@ export const api = {
 
     // Update student count in class
     const cls = classrooms.find(c => c.id === student.classId);
-    if (cls) cls.studentCount++;
+    if (cls) {
+      cls.studentCount++;
+      await googleSheetsService.updateClassroom(cls);
+    }
 
     return student;
   },
@@ -149,9 +172,15 @@ export const api = {
     const oldStudent = students.find(s => s.id === id);
     if (oldStudent && data.classId && oldStudent.classId !== data.classId) {
       const oldClass = classrooms.find(c => c.id === oldStudent.classId);
-      if (oldClass) oldClass.studentCount--;
+      if (oldClass) {
+        oldClass.studentCount--;
+        await googleSheetsService.updateClassroom(oldClass);
+      }
       const newClass = classrooms.find(c => c.id === data.classId);
-      if (newClass) newClass.studentCount++;
+      if (newClass) {
+        newClass.studentCount++;
+        await googleSheetsService.updateClassroom(newClass);
+      }
     }
 
     if (oldStudent) {
@@ -167,7 +196,10 @@ export const api = {
     const student = students.find(s => s.id === id);
     if (student) {
       const cls = classrooms.find(c => c.id === student.classId);
-      if (cls) cls.studentCount--;
+      if (cls) {
+        cls.studentCount--;
+        await googleSheetsService.updateClassroom(cls);
+      }
     }
     await googleSheetsService.deleteStudent(id);
     students = students.filter(s => s.id !== id);
@@ -175,19 +207,49 @@ export const api = {
     grades = grades.filter(g => g.studentId !== id);
   },
 
-  submitAttendance: async (classId: string, date: string, data: any): Promise<void> => {
+  updateStudentsBatch: async (updates: Student[]) => {
+    if (initPromise) await initPromise;
+    await googleSheetsService.saveStudentsBatch(updates);
+
+    // Update local cache
+    updates.forEach(u => {
+      const idx = students.findIndex(s => s.id === u.id);
+      if (idx !== -1) {
+        students[idx] = u;
+      } else {
+        students.push(u);
+      }
+    });
+
+    // Recalculate counts for all affected classrooms
+    const affectedClassIds = new Set(updates.map(u => u.classId));
+    for (const cid of affectedClassIds) {
+      const cls = classrooms.find(c => c.id === cid);
+      if (cls) {
+        cls.studentCount = students.filter(s => s.classId === cid).length;
+        await googleSheetsService.updateClassroom(cls);
+      }
+    }
+  },
+
+  submitAttendance: async (classId: string, date: string, data: any, subject: string): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(800);
     try {
-      await googleSheetsService.saveAttendanceBatch(classId, date, data);
+      await googleSheetsService.saveAttendanceBatch(classId, date, data, subject);
 
       // Update local cache
       Object.entries(data).forEach(([studentId, status]) => {
-        const existingIndex = attendance.findIndex(a => a.classId === classId && a.studentId === studentId && a.date === date);
+        const existingIndex = attendance.findIndex(a =>
+          a.classId === classId &&
+          a.studentId === studentId &&
+          a.date === date &&
+          (a.subject || 'General') === subject
+        );
         if (existingIndex >= 0) {
           attendance[existingIndex].status = status;
         } else {
-          attendance.push({ classId, date, studentId, status: status as string });
+          attendance.push({ classId, date, studentId, status: status as string, subject });
         }
       });
 
@@ -197,7 +259,15 @@ export const api = {
     }
   },
 
-  getAttendanceHistory: async (classId: string) => {
+  deleteAttendanceDate: async (classId: string, date: string): Promise<void> => {
+    if (initPromise) await initPromise;
+    await delay(500);
+    await googleSheetsService.deleteAttendance(classId, date);
+    // Update local cache
+    attendance = attendance.filter(a => !(a.classId === classId && a.date === date));
+  },
+
+  getAttendanceHistory: async (classId: string, subject: string = 'General') => {
     if (initPromise) await initPromise;
     await delay(600);
 
@@ -206,26 +276,31 @@ export const api = {
 
     const classStudents = students.filter(s => s.classId === classId);
 
-    // Generate dates (last 10 weekdays for example, or based on actual data)
-    // For now, let's look at what dates exist in the data for this class, plus some defaults if empty
-    const existingDates = Array.from(new Set(attendance.filter(a => a.classId === classId).map(a => a.date)));
+
+
+    // Filter by subject matches or default 'General' if undefined in DB
+    const subjectAttendance = attendance.filter(a =>
+      a.classId === classId &&
+      (a.subject || 'General') === subject
+    );
+
+    // Generate dates
+    const rawDates = subjectAttendance.map(a => a.date);
+    const normalizedDatesSet = new Set(rawDates.map(d => normalizeDate(d)));
+    const existingDates = Array.from(normalizedDatesSet);
 
     // If no data, provide some default dates
     let dates = existingDates;
-    if (dates.length === 0) {
-      dates = ['10 พ.ย.', '11 พ.ย.', '12 พ.ย.', '13 พ.ย.', '14 พ.ย.', '17 พ.ย.', '18 พ.ย.', '19 พ.ย.', '20 พ.ย.', '21 พ.ย.'];
-    }
 
-    // Sort dates (simple string sort might not be enough, but assuming format DD M.M.)
-    // For better sorting we might need a real date object, but let's stick to the string format for now
-    // or just trust the order they come in or sort by simple string
+    // Sort dates
     dates.sort();
 
     const historyData = classStudents.map((s, i) => {
-      const studentAttendance = attendance.filter(a => a.studentId === s.id && a.classId === classId);
+      const studentAttendance = subjectAttendance.filter(a => a.studentId === s.id);
       const studentStatuses = dates.map(d => {
-        const record = studentAttendance.find(a => a.date === d);
-        return record ? record.status : '-'; // Default to '-' if no record
+        // Find record that matches this normalized date
+        const record = studentAttendance.find(a => normalizeDate(a.date) === d);
+        return record ? record.status : '-';
       });
 
       return {
@@ -239,29 +314,58 @@ export const api = {
     return { dates, students: historyData };
   },
 
-  updateAttendanceHistory: async (classId: string, studentId: string, dateIndex: number, status: string) => {
+
+
+  updateAttendanceHistory: async (classId: string, studentId: string, dateIndex: number, status: string, subject: string = 'General') => {
     if (initPromise) await initPromise;
     await delay(200);
 
-    // We need to know the date string corresponding to the index. 
-    // This is a bit tricky since the UI passes an index.
-    // We should probably pass the date string from the UI, but let's reconstruct it for now
-    // by calling getAttendanceHistory again or caching dates. 
-    // Ideally, the UI should pass the date.
-
-    // Let's fetch current view to get dates
-    const history = await api.getAttendanceHistory(classId);
+    const history = await api.getAttendanceHistory(classId, subject); // Pass subject
     const date = history.dates[dateIndex];
 
     if (date) {
-      await googleSheetsService.updateAttendance(classId, date, studentId, status);
+      await googleSheetsService.updateAttendance(classId, date, studentId, status, subject);
 
       // Update local cache
-      const existingIndex = attendance.findIndex(a => a.classId === classId && a.studentId === studentId && a.date === date);
+      const existingIndex = attendance.findIndex(a =>
+        a.classId === classId &&
+        a.studentId === studentId &&
+        a.date === date &&
+        (a.subject || 'General') === subject
+      );
       if (existingIndex >= 0) {
         attendance[existingIndex].status = status;
       } else {
-        attendance.push({ classId, date, studentId, status });
+        attendance.push({ classId, date, studentId, status, subject });
+      }
+    }
+
+    return true;
+  },
+
+  updateAttendanceHistoryBatch: async (updates: { classId: string, studentId: string, date: string, status: string, subject: string }[]) => {
+    if (initPromise) await initPromise;
+    await delay(200);
+
+    // Process updates
+    for (const update of updates) {
+      const { classId, studentId, date, status, subject } = update;
+
+      // Update google sheets
+      await googleSheetsService.updateAttendance(classId, date, studentId, status, subject);
+
+      // Update local cache
+      const existingIndex = attendance.findIndex(a =>
+        a.classId === classId &&
+        a.studentId === studentId &&
+        a.date === date &&
+        (a.subject || 'General') === subject
+      );
+
+      if (existingIndex >= 0) {
+        attendance[existingIndex].status = status;
+      } else {
+        attendance.push({ classId, date, studentId, status, subject });
       }
     }
 
@@ -392,17 +496,162 @@ export const api = {
     };
   },
 
+  getClassroomDailyReport: async (classId: string, date: string, subject: string = 'General') => {
+    if (initPromise) await initPromise;
+    await delay(300);
+
+    // 1. Get all subjects for this class
+    const classrooms = await api.getClassrooms();
+    const cls = classrooms.find(c => c.id === classId);
+    const allSubjects = cls?.subjects && cls.subjects.length > 0 ? cls.subjects : ['General'];
+
+    // 2. Fetch history for ALL subjects in parallel
+    const historyPromises = allSubjects.map(subj => api.getAttendanceHistory(classId, subj));
+    const histories = await Promise.all(historyPromises);
+
+    // 3. Normalize Date
+    const normalizedTarget = normalizeDate(date);
+
+    // 4. Build Student Map (using first history for student list, assuming sync)
+    // If no history exists, use empty list.
+    const baseHistory = histories[0] || { students: [], dates: [] };
+
+    // Create a map of student ID -> { name, attendance: { [subject]: status } }
+    const studentMap = new Map<string, { id: string, name: string, no: number, attendance: Record<string, string> }>();
+
+    // Initialize map with students from the first available history (or all combined if needed, but usually consistent)
+    baseHistory.students.forEach(s => {
+      studentMap.set(s.id, { id: s.id, name: s.name, no: s.no, attendance: {} });
+    });
+
+    // Populate attendance for each subject
+    histories.forEach((hist, index) => {
+      const subj = allSubjects[index];
+      const dateIdx = hist.dates.findIndex(d => normalizeDate(d) === normalizedTarget);
+
+      hist.students.forEach(s => {
+        const studentRec = studentMap.get(s.id);
+        if (studentRec) {
+          const status = dateIdx !== -1 ? (s.statuses[dateIdx] || '-') : '-';
+          studentRec.attendance[subj] = status;
+        }
+      });
+    });
+
+    const studentsStatus = Array.from(studentMap.values()).map(s => ({
+      id: s.id,
+      name: s.name,
+      no: s.no,
+      attendance: s.attendance
+    }));
+
+    // 5. Calculate Stats (Backward Compatibility uses 'subject' param)
+    // If 'subject' is not in list (e.g. 'General' but class has 'Math'), default to first subject stats?
+    // Or just use the data we just fetched.
+    const primarySubject = allSubjects.includes(subject) ? subject : allSubjects[0];
+    const statsStudents = studentsStatus.map(s => ({
+      status: s.attendance[primarySubject] || '-'
+    }));
+
+    const stats = {
+      present: statsStudents.filter(s => s.status === 'present').length,
+      late: statsStudents.filter(s => s.status === 'late').length,
+      absent: statsStudents.filter(s => s.status === 'absent').length,
+      sick: statsStudents.filter(s => s.status === 'sick').length,
+      leave: statsStudents.filter(s => s.status === 'leave').length,
+    };
+
+    // Calculate Assignment Stats - Show ALL subjects for the daily report
+    const classAssignments = assignments.filter(a => a.classId === classId);
+
+    const assignedTodayList = classAssignments
+      .filter(a => normalizeDate(a.assignedDate) === normalizedTarget)
+      .map(a => ({
+        id: a.id,
+        title: a.title,
+        subject: a.subject,
+        maxScore: a.maxScore
+      }));
+
+    const classAssignmentIds = classAssignments.map(a => a.id);
+    const submittedTodayList = grades
+      .filter(g =>
+        classAssignmentIds.includes(g.assignmentId) &&
+        normalizeDate(g.submittedDate) === normalizedTarget
+      )
+      .map(g => {
+        const student = students.find(s => s.id === g.studentId);
+        const assignment = assignments.find(a => a.id === g.assignmentId);
+        return {
+          studentName: student?.name || 'Unknown',
+          assignmentTitle: assignment?.title || 'Unknown',
+          subject: assignment?.subject || 'General',
+          score: g.score
+        };
+      });
+
+    return {
+      date,
+      total: studentsStatus.length,
+      ...stats,
+      assigned: assignedTodayList.length,
+      assignedDetails: assignedTodayList,
+      submitted: submittedTodayList.length,
+      submittedDetails: submittedTodayList,
+      students: studentsStatus, // New structure: attendance is object
+      subjects: allSubjects // Return list of subjects for UI columns
+    };
+  },
+
+  getAttendanceRange: async (classId: string, startDate: string, endDate: string, subject: string = 'General') => {
+    const history = await api.getAttendanceHistory(classId, subject); // Reuses existing logic
+
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const validIndices: number[] = [];
+    const filteredDates: string[] = [];
+
+    history.dates.forEach((d, i) => {
+      const curr = new Date(d);
+      if (curr >= start && curr <= end) {
+        validIndices.push(i);
+        filteredDates.push(d);
+      }
+    });
+
+    const filteredStudents = history.students.map(s => ({
+      no: s.no,
+      id: s.id,
+      name: s.name,
+      statuses: validIndices.map(i => s.statuses[i])
+    }));
+
+    return { dates: filteredDates, students: filteredStudents };
+  },
+
   // Grading API
-  getAssignments: async (classId: string): Promise<Assignment[]> => {
+  // Grading API
+  getAssignments: async (classId: string, subject?: string): Promise<Assignment[]> => {
     if (initPromise) await initPromise;
     await delay(400);
-    return assignments.filter(a => a.classId === classId);
+    return assignments.filter(a =>
+      a.classId === classId &&
+      (!subject || a.subject === subject)
+    );
   },
 
   addAssignment: async (assignment: Omit<Assignment, 'id'>): Promise<Assignment> => {
     if (initPromise) await initPromise;
     await delay(500);
-    const newAssignment = { ...assignment, id: `a${Date.now()}` };
+    const today = new Date().toISOString().split('T')[0];
+    const newAssignment = {
+      ...assignment,
+      id: `a${Date.now()}`,
+      assignedDate: assignment.assignedDate || today
+    };
     await googleSheetsService.addAssignment(newAssignment);
     assignments.push(newAssignment);
     return newAssignment;
@@ -438,23 +687,28 @@ export const api = {
   updateGrade: async (studentId: string, assignmentId: string, score: number): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(200);
-    await googleSheetsService.updateGrade(studentId, assignmentId, score);
+    const today = new Date().toISOString().split('T')[0];
+    await googleSheetsService.updateGrade(studentId, assignmentId, score, today);
     const existingIndex = grades.findIndex(g => g.studentId === studentId && g.assignmentId === assignmentId);
     if (existingIndex >= 0) {
       grades[existingIndex].score = score;
+      grades[existingIndex].submittedDate = today;
     } else {
-      grades.push({ studentId, assignmentId, score });
+      grades.push({ studentId, assignmentId, score, submittedDate: today });
     }
   },
 
   updateGradesBatch: async (newGrades: Grade[]): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(500);
-    await googleSheetsService.saveGradesBatch(newGrades);
-    newGrades.forEach(ng => {
+    const today = new Date().toISOString().split('T')[0];
+    const gradesWithDate = newGrades.map(g => ({ ...g, submittedDate: today }));
+    await googleSheetsService.saveGradesBatch(gradesWithDate);
+    gradesWithDate.forEach(ng => {
       const existingIndex = grades.findIndex(g => g.studentId === ng.studentId && g.assignmentId === ng.assignmentId);
       if (existingIndex >= 0) {
         grades[existingIndex].score = ng.score;
+        grades[existingIndex].submittedDate = ng.submittedDate;
       } else {
         grades.push(ng);
       }
@@ -465,6 +719,13 @@ export const api = {
   getSettings: async () => {
     if (initPromise) await initPromise;
     await delay(300);
+    try {
+      const sheetsSettings = await googleSheetsService.getSettings();
+      // Merge with defaults if keys missing
+      systemSettings = { ...systemSettings, ...sheetsSettings };
+    } catch (e) {
+      console.error("Failed to load settings from sheets", e);
+    }
     return { ...systemSettings };
   },
 
@@ -472,6 +733,7 @@ export const api = {
     if (initPromise) await initPromise;
     await delay(500);
     systemSettings = { ...systemSettings, ...data };
+    await googleSheetsService.saveSettings(systemSettings);
     return systemSettings;
   }
 };

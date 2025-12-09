@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { Classroom, Student } from '../types';
+import { SuccessModal } from './ui/SuccessModal';
+import { parseInputDate } from '../utils/dateUtils';
 
 interface ManageStudentsProps {
   setLoading: (l: boolean) => void;
@@ -12,6 +14,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,6 +28,10 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
   const [classId, setClassId] = useState('');
   const [parentName, setParentName] = useState('');
   const [parentPhone, setParentPhone] = useState('');
+
+  // Success Modal State
+  const [successModalOpen, setSuccessModalOpen] = useState(false);
+  const [successModalMessage, setSuccessModalMessage] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -142,6 +149,176 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
     }
   };
 
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+
+    const readFile = (f: File, encoding: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(f, encoding);
+      });
+    };
+
+    try {
+      let text = await readFile(file, 'UTF-8');
+
+      // Check for replacement character () which indicates encoding issues
+      // Common in Thai CSVs saved from Excel (TIS-620)
+      if (text.includes('\uFFFD')) {
+        console.log('Detected encoding issues with UTF-8, retrying with TIS-620');
+        text = await readFile(file, 'TIS-620');
+      }
+
+      const lines = text.split(/\r\n|\n/);
+
+      // Parse Header helper
+      const parseLine = (line: string) => {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') { inQuote = !inQuote; }
+          else if (char === ',' && !inQuote) { result.push(current); current = ''; }
+          else { current += char; }
+        }
+        result.push(current);
+        return result.map(s => s.trim().replace(/^"|"$/g, ''));
+      };
+
+
+
+      const headers = parseLine(lines[0]);
+      // Expected headers: id, name, dob, parentName, parentPhone
+      // Optional: classId (if not present, use selectedClassId)
+
+      const updates: Student[] = [];
+      const targetClassId = selectedClassId || classrooms[0]?.id;
+
+      if (!targetClassId) {
+        alert("กรุณาเลือกห้องเรียนก่อนนำเข้าข้อมูล หรือระบุคอลัมน์ classId ในไฟล์ CSV");
+        setLoading(false);
+        return;
+      }
+
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const cols = parseLine(lines[i]);
+
+        // Map columns based on header index
+        const getCol = (name: string) => {
+          const idx = headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+          return idx !== -1 ? cols[idx] : '';
+        };
+
+        const id = getCol('id') || getCol('studentId') || getCol('รหัส');
+        const name = getCol('name') || getCol('ชื่อ');
+
+        if (id && name) {
+          updates.push({
+            id,
+            name,
+            classId: getCol('classId') || targetClassId,
+            dob: parseInputDate(getCol('dob') || ''),
+            parentName: getCol('parentName') || getCol('ผู้ปกครอง') || '',
+            parentPhone: getCol('parentPhone') || getCol('เบอร์โทร') || ''
+          });
+        }
+      }
+
+      if (updates.length > 0) {
+        await api.updateStudentsBatch(updates);
+        if (selectedClassId) {
+          const updated = await api.getStudentsByClass(selectedClassId);
+          setStudents(updated);
+        }
+        setSuccessModalMessage(`นำเข้าข้อมูลสำเร็จ ${updates.length} รายการ`);
+        setSuccessModalOpen(true);
+      } else {
+        alert("ไม่พบข้อมูลที่สามารถนำเข้าได้ กรุณาตรวจสอบไฟล์ CSV");
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV");
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setLoading(true);
+    try {
+      // Fetch fresh data from Google Sheets
+      const freshStudents = await api.getStudentsByClass(selectedClassId, true);
+
+      if (!freshStudents.length) {
+        alert("ไม่มีข้อมูลนักเรียนที่จะส่งออก");
+        return;
+      }
+
+      // 1. Headers
+      const headers = ['id', 'name', 'classId', 'dob', 'parentName', 'parentPhone'];
+
+      // 2. Rows
+      const rows = freshStudents.map(s => [
+        s.id,
+        s.name,
+        selectedClassId || s.classId, // Ensure classId matches selection if filtered
+        s.dob,
+        s.parentName || '',
+        s.parentPhone || ''
+      ]);
+
+      // 3. Convert to CSV string
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(r => r.map(c => `"${c}"`).join(','))
+      ].join('\n');
+
+      // 4. Download
+      // Use standard MIME type without extra parameters to ensure browser compatibility
+      const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Use a strictly safe filename with timestamp to ensure the .csv extension is respected
+      // We avoid using the class name for the filename to prevent encoding issues for now
+      const timestamp = new Date().toISOString().split('T')[0];
+      const fileName = `students_export_${timestamp}.csv`;
+
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 100);
+
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาดในการส่งออก: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+
+
   const getClassName = (cid: string) => classrooms.find(c => c.id === cid)?.name || cid;
 
   return (
@@ -149,29 +326,53 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
       {/* Header */}
       <div className="bg-gradient-to-r from-pink-500 to-rose-400 rounded-3xl p-8 text-white shadow-lg mb-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 -mr-10 -mt-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
-        <div className="relative z-10 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
-          <div className="flex-shrink-0">
-            <h2 className="text-2xl font-bold flex items-center gap-3">
-              <i className="fa-solid fa-users-gear opacity-80"></i> จัดการข้อมูลนักเรียน
-            </h2>
-            <p className="text-pink-100 mt-1 text-sm">เพิ่ม แก้ไข ลบ และจัดการข้อมูลรายชื่อนักเรียนในแต่ละห้อง</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto xl:justify-end">
-            <select
-              value={selectedClassId}
-              onChange={handleClassChange}
-              className="bg-white/90 border-none text-sm rounded-lg px-4 py-2.5 font-medium text-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-pink-300 min-w-[180px]"
-            >
-              <option value="">เลือกห้องเรียน...</option>
-              {classrooms.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
-            </select>
-            <button
-              onClick={openAddModal}
-              className="bg-white hover:bg-pink-50 text-pink-600 font-bold px-6 py-2.5 rounded-xl text-sm shadow-lg transition-transform hover:-translate-y-0.5 flex items-center gap-2"
-            >
-              <i className="fa-solid fa-plus"></i> เพิ่มนักเรียน
-            </button>
-          </div>
+        <div className="relative z-10">
+          <h2 className="text-2xl font-bold flex items-center gap-3">
+            <i className="fa-solid fa-users-gear opacity-80"></i> จัดการข้อมูลนักเรียน
+          </h2>
+          <p className="text-pink-100 mt-1 text-sm">เพิ่ม แก้ไข ลบ และจัดการข้อมูลรายชื่อนักเรียนในแต่ละห้อง</p>
+        </div>
+
+        <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
+          <select
+            value={selectedClassId}
+            onChange={handleClassChange}
+            className="bg-white/90 border-none text-sm rounded-lg px-4 py-2 font-medium text-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-pink-300 min-w-[200px]"
+          >
+            <option value="">เลือกห้องเรียน...</option>
+            {classrooms.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+          </select>
+
+          {selectedClassId && (
+            <>
+              <button
+                onClick={openAddModal}
+                className="bg-white/20 border border-white/40 text-white rounded-lg px-4 py-2 text-sm transition-all hover:bg-white/30 flex items-center gap-2"
+              >
+                <i className="fa-solid fa-plus"></i> เพิ่มนักเรียน
+              </button>
+
+              <input
+                type="file"
+                accept=".csv"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <button
+                onClick={handleImportClick}
+                className="bg-white/20 border border-white/40 text-white rounded-lg px-4 py-2 text-sm transition-all hover:bg-white/30 flex items-center gap-2"
+              >
+                <i className="fa-solid fa-file-import"></i> นำเข้า CSV
+              </button>
+              <button
+                onClick={handleExportCSV}
+                className="bg-white/20 border border-white/40 text-white rounded-lg px-4 py-2 text-sm transition-all hover:bg-white/30 flex items-center gap-2"
+              >
+                <i className="fa-solid fa-file-export"></i> ส่งออก CSV
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -189,6 +390,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
                 <tr className="bg-gray-50 border-b border-gray-100 text-left">
                   <th className="px-6 py-4 text-sm font-bold text-gray-900 w-32">รหัสนักเรียน</th>
                   <th className="px-6 py-4 text-sm font-bold text-gray-900">ชื่อ-สกุล</th>
+                  <th className="px-6 py-4 text-sm font-bold text-gray-900">วันเกิด</th>
                   <th className="px-6 py-4 text-sm font-bold text-gray-900">ผู้ปกครอง</th>
                   <th className="px-6 py-4 text-sm font-bold text-gray-900">ห้องเรียน</th>
                   <th className="px-6 py-4 text-right text-sm font-bold text-gray-900 min-w-[140px]">จัดการ</th>
@@ -199,6 +401,9 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
                   <tr key={s.id} className="hover:bg-pink-50/10 transition-colors">
                     <td className="px-6 py-4 text-sm font-medium text-gray-600">{s.id}</td>
                     <td className="px-6 py-4 text-sm font-bold text-gray-800">{s.name}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {s.dob ? new Date(s.dob).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : '-'}
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       <div className="font-medium text-gray-800">{s.parentName || '-'}</div>
                       <div className="text-xs text-gray-400">{s.parentPhone || '-'}</div>
@@ -223,7 +428,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
                   </tr>
                 ))}
                 {students.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-12 text-gray-400">ยังไม่มีนักเรียนในห้องนี้</td></tr>
+                  <tr><td colSpan={7} className="text-center py-12 text-gray-400">ยังไม่มีนักเรียนในห้องนี้</td></tr>
                 )}
               </tbody>
             </table>
@@ -371,6 +576,13 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
           </div>
         </div>
       )}
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={successModalOpen}
+        onClose={() => setSuccessModalOpen(false)}
+        title="นำเข้าข้อมูลสำเร็จ"
+        message={successModalMessage}
+      />
     </div>
   );
 };

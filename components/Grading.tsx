@@ -3,6 +3,9 @@ import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../services/api';
 import { Classroom, Assignment, Student, Grade } from '../types';
 
+import { SuccessModal } from './ui/SuccessModal';
+import { ConfirmModal } from './ui/ConfirmModal';
+
 interface GradingProps {
   setLoading: (l: boolean) => void;
 }
@@ -10,6 +13,7 @@ interface GradingProps {
 const Grading: React.FC<GradingProps> = ({ setLoading }) => {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
 
   const [students, setStudents] = useState<Student[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -21,6 +25,18 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
   const [newTitle, setNewTitle] = useState('');
   const [newMaxScore, setNewMaxScore] = useState(10);
   const [newDueDate, setNewDueDate] = useState('');
+  const [assignmentType, setAssignmentType] = useState<'score' | 'checklist'>('checklist'); // Default to checklist
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('บันทึกคะแนนเรียบร้อยแล้ว');
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+
+  // Confirm Modal State
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [pendingNewAssignments, setPendingNewAssignments] = useState<{ name: string, index: number }[]>([]);
+  const [pendingCsvLines, setPendingCsvLines] = useState<string[]>([]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -30,13 +46,17 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
   }, []);
 
   // Fetch Class Data
-  const fetchClassData = async (classId: string) => {
+  const fetchClassData = async (classId: string, subject?: string) => {
     if (!classId) return;
     setLoading(true);
     try {
+      // If subject is provided, use it, otherwise use selectedSubject or default.
+      // But actually, fetchClassData is usually called when we *have* a chosen subject.
+      const targetSubject = subject || selectedSubject || 'General';
+
       const [sts, asgs, grds] = await Promise.all([
         api.getStudentsByClass(classId),
-        api.getAssignments(classId),
+        api.getAssignments(classId, targetSubject),
         api.getGrades(classId)
       ]);
       setStudents(sts);
@@ -52,12 +72,25 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const cid = e.target.value;
     setSelectedClassId(cid);
+
+    // Default subject
+    const cls = classrooms.find(c => c.id === cid);
+    const defaultSubject = cls?.subjects?.[0] || 'General';
+    setSelectedSubject(defaultSubject);
+
     if (cid) {
-      fetchClassData(cid);
+      fetchClassData(cid, defaultSubject);
     } else {
       setStudents([]);
       setAssignments([]);
       setGrades([]);
+    }
+  };
+
+  const handleSubjectChange = (subject: string) => {
+    setSelectedSubject(subject);
+    if (selectedClassId) {
+      fetchClassData(selectedClassId, subject);
     }
   };
 
@@ -67,6 +100,7 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
     setNewTitle('');
     setNewMaxScore(10);
     setNewDueDate('');
+    setAssignmentType('checklist'); // Default to checklist
     setIsModalOpen(true);
   };
 
@@ -75,6 +109,7 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
     setNewTitle(a.title);
     setNewMaxScore(a.maxScore);
     setNewDueDate(a.dueDate);
+    setAssignmentType(a.type || 'score');
     setIsModalOpen(true);
   };
 
@@ -88,38 +123,49 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
         // Update existing
         await api.updateAssignment(editingAssignmentId, {
           title: newTitle,
-          maxScore: Number(newMaxScore),
-          dueDate: newDueDate
+          maxScore: assignmentType === 'checklist' ? 1 : Number(newMaxScore),
+          dueDate: newDueDate,
+          type: assignmentType
         });
       } else {
         // Create new
         await api.addAssignment({
           classId: selectedClassId,
           title: newTitle,
-          maxScore: Number(newMaxScore),
-          dueDate: newDueDate
+          maxScore: assignmentType === 'checklist' ? 1 : Number(newMaxScore),
+          dueDate: newDueDate,
+          subject: selectedSubject,
+          type: assignmentType
         });
       }
 
       await fetchClassData(selectedClassId);
       setIsModalOpen(false);
       // Reset form
+      // Reset form
       setNewTitle('');
       setNewMaxScore(10);
       setNewDueDate('');
+      setAssignmentType('checklist'); // Reset default
       setEditingAssignmentId(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteAssignment = async (id: string) => {
-    if (!confirm("ต้องการลบงานนี้ใช่หรือไม่? คะแนนทั้งหมดจะหายไป")) return;
+  const handleDeleteClick = (id: string) => {
+    setDeleteId(id);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteId) return;
     setLoading(true);
-    await api.deleteAssignment(id);
+    await api.deleteAssignment(deleteId);
     await fetchClassData(selectedClassId);
     setLoading(false);
-  }
+    setDeleteId(null);
+  };
 
   // Handle Grade Change (Direct Input)
   const handleGradeChange = async (studentId: string, assignmentId: string, value: string) => {
@@ -203,85 +249,189 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
     fileInputRef.current?.click();
   };
 
+  const executeImport = async (lines: string[]) => {
+    try {
+      setLoading(true);
+      // Re-fetch assignments to ensure we have the latest list (including just created ones)
+      const currentAssignments = await api.getAssignments(selectedClassId);
+      setAssignments(currentAssignments);
+
+      // Parse Header helper
+      const parseLine = (line: string) => {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') { inQuote = !inQuote; }
+          else if (char === ',' && !inQuote) { result.push(current); current = ''; }
+          else { current += char; }
+        }
+        result.push(current);
+        return result.map(s => s.trim());
+      };
+
+      const headers = parseLine(lines[0]);
+
+      // Map headers to assignment IDs
+      const assignmentMap: { index: number, id: string }[] = [];
+
+      currentAssignments.forEach(a => {
+        const index = headers.findIndex(h => h.replace(/^"|"$/g, '') === a.title);
+        if (index > 1) { // Skip ID and Name cols
+          assignmentMap.push({ index, id: a.id });
+        }
+      });
+
+      const updates: Grade[] = [];
+
+      // Parse Rows
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const cols = parseLine(lines[i]);
+        const studentId = cols[0].replace(/^"|"$/g, '');
+
+        // Check if student exists in this class
+        if (students.some(s => s.id === studentId)) {
+          assignmentMap.forEach(map => {
+            if (cols[map.index] !== undefined && cols[map.index] !== '') {
+              const score = Number(cols[map.index].replace(/^"|"$/g, ''));
+              if (!isNaN(score)) {
+                updates.push({
+                  studentId,
+                  assignmentId: map.id,
+                  score
+                });
+              }
+            }
+          });
+        }
+      }
+
+      if (updates.length > 0) {
+        await api.updateGradesBatch(updates);
+        await fetchClassData(selectedClassId);
+        setSuccessMessage(`นำเข้าคะแนนสำเร็จ ${updates.length} รายการ`);
+        setModalType('success');
+        setShowSuccessModal(true);
+      } else {
+        setSuccessMessage("ไม่พบคอลัมน์งานที่ตรงกัน หรือไม่มีข้อมูลคะแนน");
+        setModalType('error');
+        setShowSuccessModal(true);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmAssignmentCreation = async () => {
+    setLoading(true);
+    try {
+      for (const newAsg of pendingNewAssignments) {
+        for (const newAsg of pendingNewAssignments) {
+          await api.addAssignment({
+            classId: selectedClassId,
+            title: newAsg.name,
+            maxScore: 10, // Default max score for imported? Or checklist? Let's assume Score if imported from grades, but maybe Checklist safe?
+            // Actually if importing CSV with scores, usually 'score'.
+            dueDate: '',
+            subject: selectedSubject,
+            type: 'score'
+          });
+        }
+      }
+      // Proceed with import
+      await executeImport(pendingCsvLines);
+    } catch (err) {
+      console.error(err);
+      setSuccessMessage("เกิดข้อผิดพลาดในการสร้างงานใหม่");
+      setModalType('error');
+      setShowSuccessModal(true);
+    } finally {
+      setLoading(false);
+      setConfirmModalOpen(false);
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setLoading(true);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split(/\r\n|\n/);
 
-        // Parse Header helper
-        const parseLine = (line: string) => {
-          const result = [];
-          let current = '';
-          let inQuote = false;
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"') { inQuote = !inQuote; }
-            else if (char === ',' && !inQuote) { result.push(current); current = ''; }
-            else { current += char; }
-          }
-          result.push(current);
-          return result.map(s => s.trim());
-        };
-
-        const headers = parseLine(lines[0]);
-        // Map headers to assignment IDs
-        const assignmentMap: { index: number, id: string }[] = [];
-
-        assignments.forEach(a => {
-          const index = headers.findIndex(h => h.replace(/^"|"$/g, '') === a.title);
-          if (index > 1) { // Skip ID and Name cols
-            assignmentMap.push({ index, id: a.id });
-          }
-        });
-
-        const updates: Grade[] = [];
-
-        // Parse Rows
-        for (let i = 1; i < lines.length; i++) {
-          if (!lines[i].trim()) continue;
-          const cols = parseLine(lines[i]);
-          const studentId = cols[0].replace(/^"|"$/g, '');
-
-          // Check if student exists in this class
-          if (students.some(s => s.id === studentId)) {
-            assignmentMap.forEach(map => {
-              if (cols[map.index] !== undefined && cols[map.index] !== '') {
-                const score = Number(cols[map.index].replace(/^"|"$/g, ''));
-                if (!isNaN(score)) {
-                  updates.push({
-                    studentId,
-                    assignmentId: map.id,
-                    score
-                  });
-                }
-              }
-            });
-          }
-        }
-
-        if (updates.length > 0) {
-          await api.updateGradesBatch(updates);
-          await fetchClassData(selectedClassId);
-          alert(`Imported ${updates.length} scores successfully.`);
-        } else {
-          alert("No matching columns or data found.");
-        }
-
-      } catch (err) {
-        console.error(err);
-        alert("Failed to import CSV");
-      } finally {
-        setLoading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
+    const readFile = (f: File, encoding: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(f, encoding);
+      });
     };
-    reader.readAsText(file);
+
+    try {
+      let text = await readFile(file, 'UTF-8');
+
+      // Check for replacement character () which indicates encoding issues
+      if (text.includes('\uFFFD')) {
+        console.log('Detected encoding issues with UTF-8, retrying with TIS-620');
+        text = await readFile(file, 'TIS-620');
+      }
+
+      const lines = text.split(/\r\n|\n/);
+
+      // Parse Header helper
+      const parseLine = (line: string) => {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') { inQuote = !inQuote; }
+          else if (char === ',' && !inQuote) { result.push(current); current = ''; }
+          else { current += char; }
+        }
+        result.push(current);
+        return result.map(s => s.trim());
+      };
+
+      const headers = parseLine(lines[0]);
+
+      // 1. Identify New Assignments
+      // Known columns: Student ID, Name (and variations)
+      const ignoredCols = ['student id', 'id', 'name', 'ชื่อ', 'รหัส', 'ชื่อ-สกุล', 'ชื่อ-นามสกุล'];
+      const potentialAssignments = headers.map((h, idx) => ({ name: h.replace(/^"|"$/g, ''), index: idx }))
+        .filter(h => !ignoredCols.includes(h.name.toLowerCase()) && h.index > 1); // Assume first 2 are ID/Name
+
+      // Check against existing assignments
+      const newAssignmentsToCreate = potentialAssignments.filter(p =>
+        !assignments.some(a => a.title === p.name)
+      );
+
+      // 2. Create New Assignments
+      if (newAssignmentsToCreate.length > 0) {
+        setPendingNewAssignments(newAssignmentsToCreate);
+        setPendingCsvLines(lines);
+        setConfirmMessage(`พบงานใหม่ ${newAssignmentsToCreate.length} รายการ: ${newAssignmentsToCreate.map(a => a.name).join(', ')}\nต้องการสร้างงานเหล่านี้อัตโนมัติหรือไม่?`);
+        setConfirmModalOpen(true);
+        setLoading(false); // Stop loading while waiting for user
+        return;
+      }
+
+      // If no new assignments, proceed directly
+      await executeImport(lines);
+
+    } catch (err) {
+      console.error(err);
+      setSuccessMessage("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV");
+      setModalType('error');
+      setShowSuccessModal(true);
+      setLoading(false);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -291,7 +441,7 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
         <div className="absolute top-0 right-0 -mr-10 -mt-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
         <div className="relative z-10">
           <h2 className="text-2xl font-bold flex items-center gap-3">
-            <i className="fa-solid fa-graduation-cap opacity-80"></i> การเก็บคะแนน
+            <i className="fa-solid fa-graduation-cap opacity-80"></i> การมอบหมายงาน
           </h2>
           <p className="text-pink-100 mt-1 text-sm">บันทึกคะแนนเก็บและติดตามงานของนักเรียน</p>
         </div>
@@ -303,8 +453,30 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
             className="bg-white/90 border-none text-sm rounded-lg px-4 py-2 font-medium text-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-pink-300 min-w-[200px]"
           >
             <option value="">เลือกห้องเรียน</option>
-            {classrooms.map(c => <option key={c.id} value={c.id}>{c.name} ({c.subject})</option>)}
+            {classrooms.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+
+          {/* Subject Tabs */}
+          {selectedClassId && (
+            <div className="flex bg-white/20 rounded-lg p-1 gap-1">
+              {classrooms.find(c => c.id === selectedClassId)?.subjects?.map(sub => (
+                <button
+                  key={sub}
+                  onClick={() => handleSubjectChange(sub)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${selectedSubject === sub
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-white hover:bg-white/10'
+                    }`}
+                >
+                  {sub}
+                </button>
+              ))}
+              {/* Fallback if no subjects */}
+              {(!classrooms.find(c => c.id === selectedClassId)?.subjects?.length) && (
+                <span className="px-3 py-1.5 text-sm text-white opacity-80">ไม่มีวิชา</span>
+              )}
+            </div>
+          )}
 
           {selectedClassId && (
             <>
@@ -359,7 +531,7 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                         <div className="flex flex-col items-center">
                           <span>{a.title}</span>
                           <span className={`text-xs font-normal mt-1 px-2 py-0.5 rounded ${isOverdue(a.dueDate) ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-500'}`}>
-                            เต็ม {a.maxScore}
+                            {a.type === 'checklist' ? 'Checklist' : `เต็ม ${a.maxScore}`}
                           </span>
                           <span className="text-[10px] text-gray-400 font-normal mt-0.5">{a.dueDate ? `ครบกำหนด ${new Date(a.dueDate).toLocaleDateString('th-TH')}` : '-'}</span>
                         </div>
@@ -372,7 +544,7 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                             <i className="fa-solid fa-pen text-[10px]"></i>
                           </button>
                           <button
-                            onClick={() => handleDeleteAssignment(a.id)}
+                            onClick={() => handleDeleteClick(a.id)}
                             className="text-gray-400 hover:text-red-500 bg-white border border-gray-100 rounded-md w-6 h-6 flex items-center justify-center shadow-sm"
                             title="ลบ"
                           >
@@ -394,27 +566,42 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                         const isMissing = score === '';
                         const overdue = isOverdue(a.dueDate);
                         const isWarning = isMissing && overdue;
+                        const isChecklist = a.type === 'checklist';
 
                         return (
                           <td key={a.id} className="px-4 py-3 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              max={a.maxScore}
-                              value={score}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                if (val > a.maxScore) return; // Prevent > max
-                                handleGradeChange(s.id, a.id, e.target.value)
-                              }}
-                              className={`w-20 text-center border rounded-lg py-1.5 outline-none transition-all focus:ring-2 focus:ring-pink-300
-                                                    ${isWarning
-                                  ? 'border-red-300 bg-red-50 text-red-600 placeholder-red-300'
-                                  : 'border-gray-200 focus:border-pink-500 text-gray-700'
-                                }
-                                                `}
-                              placeholder={isWarning ? 'ขาดส่ง' : '-'}
-                            />
+                            {isChecklist ? (
+                              <div className="flex justify-center">
+                                <button
+                                  onClick={() => handleGradeChange(s.id, a.id, score === 1 ? '' : '1')} // Toggle 1 or empty
+                                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${score === 1
+                                    ? 'bg-emerald-500 text-white shadow-emerald-200 shadow-md'
+                                    : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
+                                    }`}
+                                >
+                                  {score === 1 ? <i className="fa-solid fa-check"></i> : <i className="fa-solid fa-check opacity-0"></i>}
+                                </button>
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                max={a.maxScore}
+                                value={score}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  if (val > a.maxScore) return; // Prevent > max
+                                  handleGradeChange(s.id, a.id, e.target.value)
+                                }}
+                                className={`w-20 text-center border rounded-lg py-1.5 outline-none transition-all focus:ring-2 focus:ring-pink-300
+                                                          ${isWarning
+                                    ? 'border-red-300 bg-red-50 text-red-600 placeholder-red-300'
+                                    : 'border-gray-200 focus:border-pink-500 text-gray-700'
+                                  }
+                                                      `}
+                                placeholder={isWarning ? 'ขาดส่ง' : '-'}
+                              />
+                            )}
                           </td>
                         );
                       })}
@@ -436,7 +623,8 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                   setLoading(true);
                   try {
                     await api.updateGradesBatch(grades);
-                    alert('บันทึกคะแนนเรียบร้อย');
+                    setSuccessMessage('บันทึกคะแนนเรียบร้อยแล้ว');
+                    setShowSuccessModal(true);
                   } catch (e) {
                     console.error(e);
                     alert('บันทึกไม่สำเร็จ');
@@ -475,7 +663,22 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                   placeholder="เช่น สอบย่อยบทที่ 1"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">รูปแบบการให้คะแนน</label>
+                <div className="flex gap-4">
+                  <label className={`flex-1 cursor-pointer border rounded-xl p-3 flex items-center justify-center gap-2 transition-all ${assignmentType === 'checklist' ? 'bg-pink-50 border-pink-500 text-pink-700' : 'border-gray-200 text-gray-600'}`}>
+                    <input type="radio" value="checklist" checked={assignmentType === 'checklist'} onChange={() => setAssignmentType('checklist')} className="hidden" />
+                    <i className="fa-solid fa-square-check"></i> Checklist
+                  </label>
+                  <label className={`flex-1 cursor-pointer border rounded-xl p-3 flex items-center justify-center gap-2 transition-all ${assignmentType === 'score' ? 'bg-pink-50 border-pink-500 text-pink-700' : 'border-gray-200 text-gray-600'}`}>
+                    <input type="radio" value="score" checked={assignmentType === 'score'} onChange={() => setAssignmentType('score')} className="hidden" />
+                    <i className="fa-solid fa-star"></i> คะแนน
+                  </label>
+                </div>
+              </div>
+
+              {assignmentType === 'score' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">คะแนนเต็ม</label>
                   <input
@@ -487,15 +690,15 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
                     className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">กำหนดส่ง</label>
-                  <input
-                    type="date"
-                    value={newDueDate}
-                    onChange={e => setNewDueDate(e.target.value)}
-                    className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
-                  />
-                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">กำหนดส่ง</label>
+                <input
+                  type="date"
+                  value={newDueDate}
+                  onChange={e => setNewDueDate(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
+                />
               </div>
               <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">ยกเลิก</button>
@@ -505,6 +708,33 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
           </div>
         </div>
       )}
+
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => setShowSuccessModal(false)}
+        message={successMessage}
+        type={modalType}
+      />
+
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleConfirmDelete}
+        title="ยืนยันการลบ"
+        message="ต้องการลบงานนี้ใช่หรือไม่? คะแนนทั้งหมดจะหายไป"
+        confirmText="ลบ"
+        isDanger={true}
+      />
+
+      <ConfirmModal
+        isOpen={confirmModalOpen}
+        onClose={() => setConfirmModalOpen(false)}
+        onConfirm={handleConfirmAssignmentCreation}
+        title="พบงานใหม่"
+        message={confirmMessage}
+        confirmText="สร้างงานอัตโนมัติ"
+        cancelText="ข้าม"
+      />
     </div>
   );
 };

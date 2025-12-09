@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { User } from '../types';
+import { SuccessModal } from './ui/SuccessModal';
 
 interface SettingsProps {
     user: User;
@@ -19,6 +20,11 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
     const [profileName, setProfileName] = useState(user.name);
     const [activeTab, setActiveTab] = useState<'general' | 'profile'>('general');
 
+    // Modal State
+    const [showModal, setShowModal] = useState(false);
+    const [modalMessage, setModalMessage] = useState('');
+    const [modalType, setModalType] = useState<'success' | 'error'>('success');
+
     // Sync local state with props if they change (e.g. initial load)
     useEffect(() => {
         setSchoolName(schoolSettings.schoolName);
@@ -33,9 +39,13 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
             const newSettings = { schoolName, academicYear, semester };
             await api.updateSettings(newSettings);
             setSchoolSettings(newSettings); // Update global state
-            alert('บันทึกการตั้งค่าเรียบร้อยแล้ว');
+            setModalMessage('บันทึกการตั้งค่าเรียบร้อยแล้ว');
+            setModalType('success');
+            setShowModal(true);
         } catch (err) {
-            alert('เกิดข้อผิดพลาดในการบันทึก');
+            setModalMessage('เกิดข้อผิดพลาดในการบันทึก');
+            setModalType('error');
+            setShowModal(true);
         } finally {
             setLoading(false);
         }
@@ -59,7 +69,9 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
             // Handle password change
             if (newPassword) {
                 if (currentPassword !== user.password) {
-                    alert('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+                    setModalMessage('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+                    setModalType('error');
+                    setShowModal(true);
                     setLoading(false);
                     return;
                 }
@@ -71,13 +83,17 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
             // Update local user state
             setUser({ ...user, ...updates });
 
-            alert('บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว');
+            setModalMessage('บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว');
+            setModalType('success');
+            setShowModal(true);
 
             // Clear password fields
             setCurrentPassword('');
             setNewPassword('');
         } catch (err: any) {
-            alert('เกิดข้อผิดพลาด: ' + err.message);
+            setModalMessage('เกิดข้อผิดพลาด: ' + err.message);
+            setModalType('error');
+            setShowModal(true);
         } finally {
             setLoading(false);
         }
@@ -254,7 +270,14 @@ const Settings: React.FC<SettingsProps> = ({ user, setUser, setLoading, schoolSe
                     )}
                 </div>
             </div>
-        </div>
+
+            <SuccessModal
+                isOpen={showModal}
+                onClose={() => setShowModal(false)}
+                message={modalMessage}
+                type={modalType}
+            />
+        </div >
     );
 };
 

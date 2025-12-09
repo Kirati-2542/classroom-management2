@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
+import ErrorBoundary from './ErrorBoundary';
 
 interface LayoutProps {
   user: User;
@@ -80,7 +81,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
               <NavItem page="dashboard" icon="fa-solid fa-border-all" label="แดชบอร์ด" />
               <NavItem page="attendance" icon="fa-solid fa-clipboard-check" label="เช็คชื่อ" />
               <NavItem page="history" icon="fa-solid fa-clock-rotate-left" label="ประวัติการเช็คชื่อ" />
-              <NavItem page="grading" icon="fa-solid fa-graduation-cap" label="การเก็บคะแนน" />
+              <NavItem page="grading" icon="fa-solid fa-graduation-cap" label="การมอบหมายงาน" />
               <NavItem page="manage-class" icon="fa-solid fa-chalkboard-user" label="จัดการห้องเรียน" />
               <NavItem page="manage-students" icon="fa-solid fa-users" label="นักเรียน" />
               <NavItem page="settings" icon="fa-solid fa-gear" label="ตั้งค่า" />
@@ -114,7 +115,9 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
         </header>
 
         <div className="flex-1 p-4 md:p-8">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </div>
       </main>
     </div>

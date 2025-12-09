@@ -12,10 +12,13 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Form State
   const [name, setName] = useState('');
-  const [subject, setSubject] = useState('');
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [subjectInput, setSubjectInput] = useState('');
   const [level, setLevel] = useState('');
   const [teacher, setTeacher] = useState('');
   const [emoji, setEmoji] = useState('🏫');
@@ -40,7 +43,8 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
     setIsEdit(false);
     setEditingId(null);
     setName('');
-    setSubject('');
+    setSubjects([]);
+    setSubjectInput('');
     setLevel('');
     setTeacher('');
     setEmoji('🏫');
@@ -51,19 +55,38 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
     setIsEdit(true);
     setEditingId(c.id);
     setName(c.name);
-    setSubject(c.subject);
+    setSubjects(c.subjects || []);
+    setSubjectInput('');
     setLevel(c.level);
     setTeacher(c.teacher);
     setEmoji(c.emoji);
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("คุณแน่ใจหรือไม่ที่จะลบห้องเรียนนี้?")) return;
+  const handleAddSubject = () => {
+    if (subjectInput.trim() && !subjects.includes(subjectInput.trim())) {
+      setSubjects([...subjects, subjectInput.trim()]);
+      setSubjectInput('');
+    }
+  };
+
+  const handleRemoveSubject = (subj: string) => {
+    setSubjects(subjects.filter(s => s !== subj));
+  };
+
+  const handleDelete = (id: string) => {
+    setDeleteId(id);
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
     setLoading(true);
     try {
-      await api.deleteClassroom(id);
+      await api.deleteClassroom(deleteId);
       await fetchClassrooms();
+      setIsDeleteModalOpen(false);
+      setDeleteId(null);
     } catch (err: any) {
       alert("เกิดข้อผิดพลาดในการลบ: " + (err.message || err));
     } finally {
@@ -76,9 +99,9 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
     setLoading(true);
     try {
       if (isEdit && editingId) {
-        await api.updateClassroom(editingId, { name, subject, level, teacher, emoji });
+        await api.updateClassroom(editingId, { name, subjects, level, teacher, emoji });
       } else {
-        await api.addClassroom({ name, subject, level, teacher, emoji, studentCount: 0 });
+        await api.addClassroom({ name, subjects, level, teacher, emoji, studentCount: 0 });
       }
       await fetchClassrooms();
       setIsModalOpen(false);
@@ -126,7 +149,15 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
                     <span className="text-xl">{c.emoji}</span> {c.name}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{c.level}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{c.subject}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    <div className="flex flex-wrap gap-1">
+                      {c.subjects.map((s, idx) => (
+                        <span key={idx} className="bg-pink-50 text-pink-700 px-2 py-0.5 rounded-md text-xs border border-pink-100">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{c.studentCount} คน</td>
                   <td className="px-6 py-4 text-right">
                     <button onClick={() => openEditModal(c)} className="hover:text-blue-500 px-2 transition-colors">
@@ -165,27 +196,56 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
                   placeholder="เช่น ป.1/1"
                 />
               </div>
+
+              {/* Subjects Management */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">วิชา</label>
-                <input
-                  type="text"
-                  list="subjects"
-                  value={subject}
-                  onChange={e => setSubject(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
-                  placeholder="เลือกหรือพิมพ์ชื่อวิชา"
-                />
-                <datalist id="subjects">
-                  <option value="คณิตศาสตร์" />
-                  <option value="วิทยาศาสตร์" />
-                  <option value="ภาษาไทย" />
-                  <option value="ภาษาอังกฤษ" />
-                  <option value="สังคมศึกษา" />
-                  <option value="ศิลปะ" />
-                  <option value="พลศึกษา" />
-                  <option value="การงานอาชีพ" />
-                </datalist>
+                <label className="block text-sm font-medium text-gray-700 mb-1">รายวิชา</label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    list="subjectPresets"
+                    value={subjectInput}
+                    onChange={e => setSubjectInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddSubject();
+                      }
+                    }}
+                    className="flex-1 rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
+                    placeholder="พิมพ์ชื่อวิชาแล้วกดเพิ่ม"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddSubject}
+                    className="bg-pink-100 text-pink-600 px-4 rounded-xl hover:bg-pink-200 transition-colors font-bold"
+                  >
+                    เพิ่ม
+                  </button>
+                  <datalist id="subjectPresets">
+                    <option value="คณิตศาสตร์" />
+                    <option value="วิทยาศาสตร์" />
+                    <option value="ภาษาไทย" />
+                    <option value="ภาษาอังกฤษ" />
+                    <option value="สังคมศึกษา" />
+                    <option value="ศิลปะ" />
+                    <option value="พลศึกษา" />
+                    <option value="การงานอาชีพ" />
+                  </datalist>
+                </div>
+                <div className="flex flex-wrap gap-2 min-h-[40px] p-2 bg-gray-50 rounded-xl border border-gray-200">
+                  {subjects.length === 0 && <span className="text-gray-400 text-sm">ยังไม่มีวิชาที่เลือก</span>}
+                  {subjects.map((subj, idx) => (
+                    <span key={idx} className="bg-white border border-pink-200 text-pink-700 px-3 py-1 rounded-full text-sm flex items-center gap-2 shadow-sm">
+                      {subj}
+                      <button type="button" onClick={() => handleRemoveSubject(subj)} className="text-pink-400 hover:text-red-500">
+                        <i className="fa-solid fa-xmark"></i>
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ระดับชั้น</label>
@@ -249,6 +309,36 @@ const ManageClassrooms: React.FC<ManageClassroomsProps> = ({ setLoading }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                <i className="fa-solid fa-triangle-exclamation"></i>
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">ยืนยันการลบ</h3>
+              <p className="text-gray-600 mb-6">คุณแน่ใจหรือไม่ที่จะลบห้องเรียนนี้? <br />การกระทำนี้ไม่สามารถย้อนกลับได้</p>
+
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl transition-colors font-medium"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-200 transition-all"
+                >
+                  ลบห้องเรียน
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

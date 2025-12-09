@@ -2,6 +2,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../services/api';
 import { Classroom } from '../types';
+import { SuccessModal } from './ui/SuccessModal';
+
+import { ConfirmModal } from './ui/ConfirmModal';
+import { normalizeDate, formatDisplayDate } from '../utils/dateUtils';
 
 interface HistoryProps {
   setLoading: (l: boolean) => void;
@@ -10,10 +14,25 @@ interface HistoryProps {
 const History: React.FC<HistoryProps> = ({ setLoading }) => {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
   const [historyData, setHistoryData] = useState<{ dates: string[], students: any[] } | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('บันทึกข้อมูลเรียบร้อยแล้ว');
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+
+  // Delete Modal State
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [dateToDelete, setDateToDelete] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Edit State
   const [activeCell, setActiveCell] = useState<{ studentIndex: number, dateIndex: number, x: number, y: number } | null>(null);
+
+  // Pending updates for batch save
+  const [pendingUpdates, setPendingUpdates] = useState<{ studentId: string, dateIndex: number, status: string, date: string }[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,16 +52,37 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
   const handleClassChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const classId = e.target.value;
     setSelectedClassId(classId);
+
+    // Default to first subject of new class
+    const cls = classrooms.find(c => c.id === classId);
+    const defaultSubject = cls?.subjects?.[0] || 'General';
+    setSelectedSubject(defaultSubject);
+
     if (classId) {
       setLoading(true);
       try {
-        const data = await api.getAttendanceHistory(classId);
+        const data = await api.getAttendanceHistory(classId, defaultSubject);
         setHistoryData(data);
+        setPendingUpdates([]); // Clear pending when reloading
       } finally {
         setLoading(false);
       }
     } else {
       setHistoryData(null);
+    }
+  };
+
+  const handleSubjectChange = async (subject: string) => {
+    setSelectedSubject(subject);
+    if (selectedClassId) {
+      setLoading(true);
+      try {
+        const data = await api.getAttendanceHistory(selectedClassId, subject);
+        setHistoryData(data);
+        setPendingUpdates([]); // Clear pending when reloading
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -58,9 +98,117 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
     return stats;
   };
 
-  const handleDownload = () => {
+
+
+  const handleImportClick = () => {
+    if (!selectedClassId) {
+      setSuccessMessage("กรุณาเลือกห้องเรียนก่อนนำเข้าข้อมูล");
+      setModalType('error');
+      setShowSuccessModal(true);
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+
+    const readFile = (f: File, encoding: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(f, encoding);
+      });
+    };
+
+    try {
+      let text = await readFile(file, 'UTF-8');
+      if (text.includes('\uFFFD')) {
+        text = await readFile(file, 'TIS-620');
+      }
+
+      const lines = text.split(/\r\n|\n/);
+      const parseLine = (line: string) => {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') { inQuote = !inQuote; }
+          else if (char === ',' && !inQuote) { result.push(current); current = ''; }
+          else { current += char; }
+        }
+        result.push(current);
+        return result.map(s => s.trim());
+      };
+
+      const headers = parseLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+
+      // Identify Date Columns
+      const fixedCols = ["No", "Student ID", "Name", "Present", "Absent", "Late", "Sick", "Leave", "มา", "ขาด", "สาย", "ป่วย", "ลา"];
+      const dateCols = headers.map((h, i) => ({ name: h, index: i }))
+        .filter(h => !fixedCols.includes(h.name) && h.index > 2);
+
+      const updatesByDate: Record<string, Record<string, string>> = {};
+
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const cols = parseLine(lines[i]);
+        const studentId = cols[1]?.replace(/^"|"$/g, ''); // Index 1 is Student ID
+
+        if (studentId) {
+          dateCols.forEach(dc => {
+            const rawStatus = cols[dc.index]?.replace(/^"|"$/g, '').trim().toLowerCase();
+            if (rawStatus) {
+              let status = '';
+              if (['present', 'มา', '1', '/', 'check', 'p', 'true'].includes(rawStatus)) status = 'present';
+              else if (['absent', 'ขาด', '0', 'x', 'a', 'false'].includes(rawStatus)) status = 'absent';
+              else if (['late', 'สาย', 'l'].includes(rawStatus)) status = 'late';
+              else if (['sick', 'ป่วย', 's'].includes(rawStatus)) status = 'sick';
+              else if (['leave', 'ลา'].includes(rawStatus)) status = 'leave';
+
+              if (status) {
+                const normalizedDate = normalizeDate(dc.name);
+                if (!updatesByDate[normalizedDate]) updatesByDate[normalizedDate] = {};
+                updatesByDate[normalizedDate][studentId] = status;
+              }
+            }
+          });
+        }
+      }
+
+      // Submit updates
+      for (const [date, data] of Object.entries(updatesByDate)) {
+        await api.submitAttendance(selectedClassId, date, data, selectedSubject);
+      }
+
+      // Refresh
+      const data = await api.getAttendanceHistory(selectedClassId);
+      setHistoryData(data);
+      setSuccessMessage('นำเข้าข้อมูลการเช็คชื่อเรียบร้อยแล้ว');
+      setModalType('success');
+      setShowSuccessModal(true);
+
+    } catch (err) {
+      console.error(err);
+      setSuccessMessage("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV");
+      setModalType('error');
+      setShowSuccessModal(true);
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportCSV = () => {
     if (!historyData || !selectedClassId) {
-      alert("กรุณาเลือกห้องเรียนก่อนดาวน์โหลด");
+      setSuccessMessage("กรุณาเลือกห้องเรียนก่อนดาวน์โหลด");
+      setModalType('error');
+      setShowSuccessModal(true);
       return;
     }
 
@@ -113,6 +261,33 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
     document.body.removeChild(link);
   };
 
+  const handleDeleteClick = (date: string) => {
+    setDateToDelete(date);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedClassId || !dateToDelete) return;
+    setLoading(true);
+    try {
+      await api.deleteAttendanceDate(selectedClassId, dateToDelete);
+      // Refresh
+      const data = await api.getAttendanceHistory(selectedClassId);
+      setSuccessMessage(`ลบข้อมูลวันที่ ${dateToDelete} เรียบร้อยแล้ว`);
+      setModalType('success');
+      setShowSuccessModal(true);
+    } catch (err) {
+      console.error(err);
+      setSuccessMessage("เกิดข้อผิดพลาดในการลบข้อมูล");
+      setModalType('error');
+      setShowSuccessModal(true);
+    } finally {
+      setLoading(false);
+      setDeleteModalOpen(false);
+      setDateToDelete(null);
+    }
+  };
+
   const handleCellClick = (e: React.MouseEvent, studentIndex: number, dateIndex: number) => {
     e.stopPropagation();
     const rect = (e.target as HTMLElement).getBoundingClientRect();
@@ -124,21 +299,60 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
     });
   };
 
-  const handleStatusUpdate = async (newStatus: string) => {
+  const handleStatusUpdate = async (status: string) => {
     if (!activeCell || !historyData) return;
     const { studentIndex, dateIndex } = activeCell;
     const student = historyData.students[studentIndex];
+    const date = historyData.dates[dateIndex];
 
-    // Optimistic Update
-    const updatedStudents = [...historyData.students];
-    updatedStudents[studentIndex].statuses[dateIndex] = newStatus;
-    setHistoryData({ ...historyData, students: updatedStudents });
+    // Optimistic update locally
+    const newData = { ...historyData };
+    // Create shallow copy of students array and the specific student object to avoid mutation
+    newData.students = [...historyData.students];
+    newData.students[studentIndex] = {
+      ...newData.students[studentIndex],
+      statuses: [...newData.students[studentIndex].statuses]
+    };
+    newData.students[studentIndex].statuses[dateIndex] = status;
+    setHistoryData(newData);
+
+    // Add to pending updates
+    setPendingUpdates(prev => {
+      // Remove existing update for same cell if any
+      const filtered = prev.filter(p => !(p.studentId === student.id && p.dateIndex === dateIndex));
+      return [...filtered, { studentId: student.id, dateIndex, status, date }];
+    });
+
     setActiveCell(null);
+  };
 
+  const handleSaveChanges = async () => {
+    if (pendingUpdates.length === 0) return;
+
+    setIsSaving(true);
     try {
-      await api.updateAttendanceHistory(selectedClassId, student.id, dateIndex, newStatus);
+      // Convert pending updates to API format
+      const updates = pendingUpdates.map(p => ({
+        classId: selectedClassId,
+        studentId: p.studentId,
+        date: p.date,
+        status: p.status,
+        subject: selectedSubject
+      }));
+
+      await api.updateAttendanceHistoryBatch(updates);
+
+      setPendingUpdates([]);
+      setSuccessMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
+      setModalType('success');
+      setShowSuccessModal(true);
     } catch (error) {
-      console.error("Failed to update status", error);
+      console.error('Error saving changes:', error);
+      setSuccessMessage('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      setModalType('error');
+      setShowSuccessModal(true);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -152,6 +366,8 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
       default: return <span className="text-gray-300">-</span>;
     }
   };
+
+
 
   return (
     <div className="animate-fadeIn relative">
@@ -180,11 +396,45 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
             <option value="">เลือกห้องเรียน</option>
             {classrooms.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          {/* Subject Tabs */}
+          {selectedClassId && (
+            <div className="flex bg-white/20 rounded-lg p-1 gap-1">
+              {classrooms.find(c => c.id === selectedClassId)?.subjects?.map(sub => (
+                <button
+                  key={sub}
+                  onClick={() => handleSubjectChange(sub)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${selectedSubject === sub
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-white hover:bg-white/10'
+                    }`}
+                >
+                  {sub}
+                </button>
+              ))}
+              {/* Fallback if no subjects */}
+              {(!classrooms.find(c => c.id === selectedClassId)?.subjects?.length) && (
+                <span className="px-3 py-1.5 text-sm text-white opacity-80">ไม่มีวิชา</span>
+              )}
+            </div>
+          )}
+          <input
+            type="file"
+            accept=".csv"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+          />
           <button
-            onClick={handleDownload}
-            className="bg-white/20 border border-white/40 text-white rounded-lg px-4 py-2 text-sm transition-all hover:bg-white/30 flex items-center gap-2"
+            onClick={handleImportClick}
+            className="bg-pink-400/20 hover:bg-pink-400/30 border border-pink-200/50 text-white rounded-xl px-4 py-2 text-sm transition-all flex items-center gap-2 backdrop-blur-sm"
           >
-            <i className="fa-solid fa-download"></i> ดาวน์โหลด
+            <i className="fa-solid fa-file-import"></i> นำเข้า CSV
+          </button>
+          <button
+            onClick={handleExportCSV}
+            className="bg-pink-400/20 hover:bg-pink-400/30 border border-pink-200/50 text-white rounded-xl px-4 py-2 text-sm transition-all flex items-center gap-2 backdrop-blur-sm"
+          >
+            <i className="fa-solid fa-file-export"></i> ส่งออก CSV
           </button>
         </div>
       </div>
@@ -196,7 +446,16 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
               <tr>
                 <th className="p-2 border-b text-left text-sm font-bold text-gray-600 min-w-[150px] sticky left-0 bg-gray-50 z-20">ชื่อ-สกุล</th>
                 {historyData?.dates.map((d, i) => (
-                  <th key={i} className="p-2 border-b vertical-text h-24 text-xs font-medium text-gray-500 w-8">{d}</th>
+                  <th key={i} className="p-2 border-b vertical-text h-24 text-xs font-medium text-gray-500 w-8 group relative">
+                    {formatDisplayDate(d)}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteClick(d); }}
+                      className="absolute -top-1 left-1/2 -translate-x-1/2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                      title="ลบวันนี้"
+                    >
+                      <i className="fa-solid fa-trash-can text-xs rotate-180"></i>
+                    </button>
+                  </th>
                 ))}
                 {/* Summary Headers */}
                 <th className="p-2 border-b h-24 vertical-text text-xs font-bold text-emerald-600 bg-emerald-50/50 w-10">มา</th>
@@ -216,8 +475,14 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
                       <td
                         key={dateIdx}
                         onClick={(e) => handleCellClick(e, idx, dateIdx)}
-                        className="p-2 text-center text-xs cursor-pointer hover:bg-gray-100 transition-colors"
+                        className={`p-2 text-center text-xs cursor-pointer transition-colors relative
+                                    ${pendingUpdates.some(p => p.studentId === s.id && p.dateIndex === dateIdx) ? 'bg-yellow-50 shadow-inner' : 'hover:bg-gray-100'}
+                                  `}
                       >
+                        {/* Changed indicator */}
+                        {pendingUpdates.some(p => p.studentId === s.id && p.dateIndex === dateIdx) && (
+                          <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-yellow-400 rounded-full"></div>
+                        )}
                         <div className="flex items-center justify-center h-full w-full">
                           {getStatusIcon(st)}
                         </div>
@@ -238,6 +503,23 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
           </table>
         </div>
       </div>
+
+      {/* Save Button */}
+      {pendingUpdates.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-bounce-in">
+          <button
+            onClick={handleSaveChanges}
+            disabled={isSaving}
+            className={`shadow-lg shadow-pink-200 bg-pink-500 hover:bg-pink-600 text-white px-8 py-3 rounded-full font-bold text-lg flex items-center gap-3 transition-all transform hover:scale-105 ${isSaving ? 'opacity-75 cursor-not-allowed' : ''}`}
+          >
+            {isSaving ? (
+              <><i className="fa-solid fa-circle-notch fa-spin"></i> กำลังบันทึก...</>
+            ) : (
+              <><i className="fa-solid fa-save"></i> บันทึกการเปลี่ยนแปลง ({pendingUpdates.length})</>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Floating Status Menu */}
       {activeCell && (
@@ -263,6 +545,24 @@ const History: React.FC<HistoryProps> = ({ setLoading }) => {
           </button>
         </div>
       )}
+
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => setShowSuccessModal(false)}
+        title={modalType === 'success' ? 'บันทึกเรียบร้อย' : 'ข้อผิดพลาด'}
+        message={successMessage}
+        type={modalType}
+      />
+
+      <ConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={confirmDelete}
+        title="ยืนยันการลบ"
+        message={`คุณต้องการลบข้อมูลการเช็คชื่อของวันที่ ${dateToDelete ? formatDisplayDate(dateToDelete) : ''} หรือไม่?`}
+        confirmText="ลบข้อมูล"
+        cancelText="ยกเลิก"
+      />
     </div>
   );
 };

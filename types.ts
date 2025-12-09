@@ -22,7 +22,7 @@ export interface Student {
 export interface Classroom {
   id: string;
   name: string;
-  subject: string;
+  subjects: string[]; // Changed from single subject to array
   level: string;
   studentCount: number;
   emoji: string;
@@ -32,6 +32,7 @@ export interface Classroom {
 export interface AttendanceRecord {
   date: string;
   status: 'present' | 'late' | 'absent' | 'leave' | 'sick';
+  subject?: string; // Track which subject this attendance is for
 }
 
 export interface StudentAttendance {
@@ -42,13 +43,17 @@ export interface StudentAttendance {
 export interface Assignment {
   id: string;
   classId: string;
+  subject: string; // Add subject link
   title: string;
   maxScore: number;
   dueDate: string;
+  type?: 'score' | 'checklist'; // 'score' is default
+  assignedDate?: string; // Date when assignment was created
 }
 
 export interface Grade {
   studentId: string;
   assignmentId: string;
   score: number;
+  submittedDate?: string; // Date of submission
 }

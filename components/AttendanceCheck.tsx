@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { Classroom, Student } from '../types';
 
+import { SuccessModal } from './ui/SuccessModal';
+
 interface AttendanceCheckProps {
   classroom: Classroom;
   onBack: () => void;
@@ -11,7 +13,9 @@ interface AttendanceCheckProps {
 const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, setLoading }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedSubject, setSelectedSubject] = useState(classroom.subjects?.[0] || 'General'); // Default to first or 'General'
   const [attendance, setAttendance] = useState<Record<string, string>>({});
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -32,10 +36,9 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
 
   const submitAttendance = async () => {
     setLoading(true);
-    await api.submitAttendance(classroom.id, date, attendance);
+    await api.submitAttendance(classroom.id, date, attendance, selectedSubject);
     setLoading(false);
-    alert('บันทึกเรียบร้อย');
-    // onBack(); // Stay on page
+    setShowSuccessModal(true);
   };
 
   return (
@@ -48,7 +51,24 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
           </div>
           <div>
             <h2 className="text-3xl font-bold">{classroom.name}</h2>
-            <p className="text-pink-100">{classroom.subject}</p>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {classroom.subjects?.map(sub => (
+                <button
+                  key={sub}
+                  onClick={() => setSelectedSubject(sub)}
+                  className={`px-3 py-1 rounded-full text-xs transition-all border ${selectedSubject === sub
+                      ? 'bg-white text-pink-600 font-bold border-white'
+                      : 'bg-white/20 text-white hover:bg-white/30 border-transparent'
+                    }`}
+                >
+                  {sub}
+                </button>
+              ))}
+            </div>
+            {/* Show Current Subject Context */}
+            <div className="mt-2 text-sm text-pink-100 font-medium bg-pink-600/20 inline-block px-3 py-1 rounded-lg">
+              กำลังเช็คชื่อวิชา: {selectedSubject}
+            </div>
           </div>
         </div>
         <div className="relative z-10 text-right">
@@ -97,10 +117,10 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
                             onChange={() => handleStatusChange(s.id, status)}
                           />
                           <span className={`block py-1.5 rounded-full text-xs text-center transition-all ${attendance[s.id] === status
-                              ? (status === 'present' ? 'bg-emerald-500 text-white' :
-                                status === 'absent' ? 'bg-red-500 text-white' :
-                                  status === 'late' ? 'bg-orange-400 text-white' : 'bg-blue-500 text-white')
-                              : 'text-gray-500 hover:bg-gray-200'
+                            ? (status === 'present' ? 'bg-emerald-500 text-white' :
+                              status === 'absent' ? 'bg-red-500 text-white' :
+                                status === 'late' ? 'bg-orange-400 text-white' : 'bg-blue-500 text-white')
+                            : 'text-gray-500 hover:bg-gray-200'
                             }`}>
                             {status === 'present' ? 'มา' :
                               status === 'absent' ? 'ขาด' :
@@ -135,6 +155,15 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
       <button onClick={onBack} className="mt-4 text-gray-400 hover:text-gray-600 text-sm flex items-center gap-2">
         <i className="fa-solid fa-arrow-left"></i> ย้อนกลับไปหน้ารวมห้องเรียน
       </button>
+
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => {
+          setShowSuccessModal(false);
+          // onBack(); // Optional: Go back after success
+        }}
+        message="บันทึกการเช็คชื่อเรียบร้อยแล้ว"
+      />
     </div>
   );
 };

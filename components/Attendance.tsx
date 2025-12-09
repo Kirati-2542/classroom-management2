@@ -44,7 +44,7 @@ const Attendance: React.FC<AttendanceProps> = ({ onSelectClass, onAddClass, setL
               </div>
             </div>
             <h3 className="text-xl font-bold text-gray-800 mb-1">{c.name}</h3>
-            <p className="text-sm text-gray-500 mb-4">{c.level} · {c.subject}</p>
+            <p className="text-sm text-gray-500 mb-4">{c.level} · {c.subjects.join(', ')}</p>
             <div className="flex items-center text-xs text-gray-400 font-medium bg-gray-50 w-fit px-3 py-1 rounded-full">
               <i className="fa-solid fa-user-group mr-2"></i> นักเรียน {c.studentCount} คน
             </div>

@@ -1,170 +1,514 @@
 import React, { useEffect, useState } from 'react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts';
 import { api } from '../services/api';
+import { Classroom } from '../types';
+import { normalizeDate, formatDisplayDate } from '../utils/dateUtils';
+import { SuccessModal } from './ui/SuccessModal';
 
 const Dashboard: React.FC = () => {
-  const [stats, setStats] = useState({
-    attendanceRate: 0,
-    lateRate: 0,
-    absentRate: 0
-  });
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [followUpStudents, setFollowUpStudents] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Daily Report State
+  const [dailyReport, setDailyReport] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Export Modal State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [exportClassId, setExportClassId] = useState('');
+
+  // Notifications
+  const [showModal, setShowModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+
+  // Summary Subject State
+  const [selectedSummarySubject, setSelectedSummarySubject] = useState('');
 
   useEffect(() => {
-    const fetchData = async () => {
+    api.getClassrooms().then(data => {
+      setClassrooms(data);
+      if (data.length > 0) {
+        // Optional: Auto select first class? 
+        // Let's force user to select to be explicit
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedClassId || !selectedDate) {
+      setDailyReport(null);
+      return;
+    }
+
+    const fetchReport = async () => {
+      setLoading(true);
       try {
-        const data = await api.getDashboardStats();
-        setStats({
-          attendanceRate: data.attendanceRate,
-          lateRate: data.lateRate,
-          absentRate: data.absentRate
-        });
-        setChartData(data.chartData);
-        setFollowUpStudents(data.followUpStudents);
+        // Assuming 'General' subject for dashboard overview for now, or we could add subject selector
+        // Using first subject or General
+        const cls = classrooms.find(c => c.id === selectedClassId);
+        const subject = cls?.subjects?.[0] || 'General';
+
+        const report = await api.getClassroomDailyReport(selectedClassId, selectedDate, subject);
+        setDailyReport(report);
       } catch (error) {
-        console.error("Failed to fetch dashboard stats:", error);
+        console.error(error);
       } finally {
         setLoading(false);
       }
     };
-    fetchData();
-  }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-500"></div>
-      </div>
-    );
-  }
+    fetchReport();
+    fetchReport();
+  }, [selectedClassId, selectedDate, classrooms]);
+
+  // Update selectedSummarySubject when report changes
+  useEffect(() => {
+    if (dailyReport?.subjects?.length > 0) {
+      setSelectedSummarySubject(dailyReport.subjects[0]);
+    }
+  }, [dailyReport]);
+
+  const currentStats = React.useMemo(() => {
+    if (!dailyReport || !selectedSummarySubject) return { present: 0, absent: 0, late: 0, sick: 0, leave: 0 };
+
+    const stats = { present: 0, absent: 0, late: 0, sick: 0, leave: 0 };
+
+    dailyReport.students.forEach((s: any) => {
+      const status = s.attendance[selectedSummarySubject];
+      if (status === 'present') stats.present++;
+      else if (status === 'absent') stats.absent++;
+      else if (status === 'late') stats.late++;
+      else if (status === 'sick') stats.sick++;
+      else if (status === 'leave') stats.leave++;
+    });
+
+    return stats;
+  }, [dailyReport, selectedSummarySubject]);
+
+  const handleExport = async () => {
+    if (!exportClassId || !exportStartDate || !exportEndDate) {
+      setModalMessage('กรุณากรอกข้อมูลให้ครบถ้วน');
+      setModalType('error');
+      setShowModal(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const cls = classrooms.find(c => c.id === exportClassId);
+      const subject = cls?.subjects?.[0] || 'General';
+
+      const data = await api.getAttendanceRange(exportClassId, exportStartDate, exportEndDate, subject);
+
+      if (data.dates.length === 0) {
+        setModalMessage('ไม่พบข้อมูลในช่วงเวลาที่เลือก');
+        setModalType('error');
+        setShowModal(true);
+        return;
+      }
+
+      // Generate CSV
+      // Headers
+      const headers = ["No", "Student ID", "Name", ...data.dates.map(d => formatDisplayDate(d))];
+
+      // Rows
+      const rows = data.students.map((s: any) => [
+        s.no,
+        s.id,
+        s.name,
+        ...s.statuses.map((st: string) => {
+          if (st === 'present') return 'มา';
+          if (st === 'absent') return 'ขาด';
+          if (st === 'late') return 'สาย';
+          if (st === 'sick') return 'ป่วย';
+          if (st === 'leave') return 'ลา';
+          return '-';
+        })
+      ]);
+
+      const csvContent = [
+        headers.join(","),
+        ...rows.map(r => r.map((c: any) => `"${c}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `attendance_export_${cls?.name}_${exportStartDate}_to_${exportEndDate}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setShowExportModal(false);
+      setModalMessage('ดาวน์โหลดข้อมูลสำเร็จ');
+      setModalType('success');
+      setShowModal(true);
+
+    } catch (error) {
+      console.error(error);
+      setModalMessage('เกิดข้อผิดพลาดในการส่งออกข้อมูล');
+      setModalType('error');
+      setShowModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="animate-fadeIn">
-      <div className="bg-gradient-to-r from-pink-500 to-rose-400 rounded-3xl p-8 text-white shadow-lg mb-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mr-10 -mt-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
-        <div className="relative z-10">
-          <h2 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
-            <i className="fa-solid fa-table-cells-large opacity-80"></i> ภาพรวมสถิติ
-          </h2>
-          <p className="text-pink-100 mt-1">สรุปผลการเข้าเรียนทั้งหมดในภาพรวม</p>
+    <div className="animate-fadeIn pb-20">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div>
+          <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-purple-600 flex items-center gap-3 drop-shadow-sm">
+            <i className="fa-solid fa-chart-pie text-pink-500"></i> แดชบอร์ด
+          </h1>
+          <p className="text-gray-500 font-medium mt-2 flex items-center gap-2">
+            <span className="w-8 h-1 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full"></span>
+            รายงานสรุปข้อมูลการเข้าเรียนรายวัน
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setExportStartDate(new Date().toISOString().split('T')[0]);
+            setExportEndDate(new Date().toISOString().split('T')[0]);
+            setExportClassId(selectedClassId || (classrooms[0]?.id || ''));
+            setShowExportModal(true);
+          }}
+          className="group bg-white border border-pink-100 text-pink-600 hover:bg-pink-50 hover:border-pink-200 px-6 py-3 rounded-2xl shadow-sm hover:shadow-md transition-all flex items-center gap-3 font-bold"
+        >
+          <div className="bg-pink-100 p-2 rounded-lg group-hover:scale-110 transition-transform">
+            <i className="fa-solid fa-download text-pink-500"></i>
+          </div>
+          ส่งออกรายงาน
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-2xl p-6 shadow-xl shadow-pink-50/50 border border-pink-100/50 mb-8 flex flex-col md:flex-row gap-6 items-end backdrop-blur-sm relative overflow-hidden">
+        {/* Decorative background element for filters */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-pink-50/50 to-purple-50/50 rounded-full blur-3xl -translate-y-32 translate-x-32 pointer-events-none"></div>
+
+        <div className="flex-1 w-full relative z-10">
+          <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+            <i className="fa-solid fa-school text-pink-400"></i> เลือกห้องเรียน
+          </label>
+          <div className="relative">
+            <select
+              value={selectedClassId}
+              onChange={(e) => setSelectedClassId(e.target.value)}
+              className="w-full bg-gray-50 border-2 border-transparent hover:bg-white hover:border-pink-200 focus:bg-white focus:border-pink-500 rounded-xl px-4 py-3 text-gray-700 focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all appearance-none cursor-pointer"
+            >
+              <option value="">-- กรุณาเลือกห้องเรียน --</option>
+              {classrooms.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-pink-400 pointer-events-none">
+              <i className="fa-solid fa-chevron-down"></i>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 w-full relative z-10">
+          <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+            <i className="fa-regular fa-calendar text-pink-400"></i> เลือกวันที่
+          </label>
+          <div className="relative">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full bg-gray-50 border-2 border-transparent hover:bg-white hover:border-pink-200 focus:bg-white focus:border-pink-500 rounded-xl px-4 py-3 text-gray-700 focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all cursor-pointer"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <div className="text-gray-500 mb-2">มาเรียนเฉลี่ย</div>
-          <div className="text-4xl font-bold text-emerald-500 mb-2">{stats.attendanceRate}%</div>
-          <div className="text-xs text-gray-400 font-medium flex items-center gap-1">
-            จากข้อมูลทั้งหมด
-          </div>
+      {/* Daily Report Content */}
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-pink-500"></div>
         </div>
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <div className="text-gray-500 mb-2">มาสายเฉลี่ย</div>
-          <div className="text-4xl font-bold text-blue-500 mb-2">{stats.lateRate}%</div>
-          <div className="text-xs text-gray-400 font-medium flex items-center gap-1">
-            จากข้อมูลทั้งหมด
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          <div className="text-gray-500 mb-2">ขาดเรียนเฉลี่ย</div>
-          <div className="text-4xl font-bold text-red-500 mb-2">{stats.absentRate}%</div>
-          <div className="text-xs text-gray-400 font-medium flex items-center gap-1">
-            จากข้อมูลทั้งหมด
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 lg:col-span-2">
-          <div className="flex justify-between items-center mb-6">
-            <div><h3 className="font-bold text-lg">แนวโน้มการเข้าเรียน (5 วันล่าสุด)</h3></div>
-          </div>
-          <div className="h-64 w-full">
-            {chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ec4899" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                  <YAxis axisLine={false} tickLine={false} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Area type="monotone" dataKey="present" stroke="#ec4899" fillOpacity={1} fill="url(#colorPresent)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400">
-                ยังไม่มีข้อมูลเพียงพอ
+      ) : dailyReport ? (
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          {/* Summary Cards */}
+          {/* Summary Section Container */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            {/* Subject Selector */}
+            {dailyReport.subjects && dailyReport.subjects.length > 0 && (
+              <div className="bg-gray-50/80 p-1.5 rounded-xl mb-6 overflow-x-auto border border-gray-100">
+                <div className="flex gap-1">
+                  {dailyReport.subjects.map((subj: string) => (
+                    <button
+                      key={subj}
+                      onClick={() => setSelectedSummarySubject(subj)}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2
+                            ${selectedSummarySubject === subj
+                          ? 'bg-white text-pink-600 shadow-sm ring-1 ring-black/5'
+                          : 'text-gray-500 hover:bg-white/50 hover:text-pink-500'}`}
+                    >
+                      {selectedSummarySubject === subj && <i className="fa-solid fa-check text-xs"></i>}
+                      {subj}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className={`bg-emerald-50 text-emerald-700 p-4 rounded-xl border border-emerald-100 transition-all ${selectedSummarySubject ? 'transform hover:scale-105' : ''}`}>
+                <div className="text-xs font-bold uppercase mb-1 opacity-70">มาเรียน</div>
+                <div className="text-2xl font-bold">{currentStats.present}</div>
+              </div>
+              <div className={`bg-red-50 text-red-700 p-4 rounded-xl border border-red-100 transition-all ${selectedSummarySubject ? 'transform hover:scale-105' : ''}`}>
+                <div className="text-xs font-bold uppercase mb-1 opacity-70">ขาดเรียน</div>
+                <div className="text-2xl font-bold">{currentStats.absent}</div>
+              </div>
+              <div className={`bg-orange-50 text-orange-700 p-4 rounded-xl border border-orange-100 transition-all ${selectedSummarySubject ? 'transform hover:scale-105' : ''}`}>
+                <div className="text-xs font-bold uppercase mb-1 opacity-70">สาย</div>
+                <div className="text-2xl font-bold">{currentStats.late}</div>
+              </div>
+              <div className={`bg-purple-50 text-purple-700 p-4 rounded-xl border border-purple-100 transition-all ${selectedSummarySubject ? 'transform hover:scale-105' : ''}`}>
+                <div className="text-xs font-bold uppercase mb-1 opacity-70">ป่วย</div>
+                <div className="text-2xl font-bold">{currentStats.sick}</div>
+              </div>
+              <div className={`bg-blue-50 text-blue-700 p-4 rounded-xl border border-blue-100 transition-all ${selectedSummarySubject ? 'transform hover:scale-105' : ''}`}>
+                <div className="text-xs font-bold uppercase mb-1 opacity-70">ลา</div>
+                <div className="text-2xl font-bold">{currentStats.leave}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Assignment Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-indigo-50 text-indigo-700 p-4 rounded-xl border border-indigo-100">
+              <div className="flex justify-between items-center mb-2">
+                <div>
+                  <div className="text-xs font-bold uppercase mb-1 opacity-70">งานที่มอบหมายวันนี้</div>
+                  <div className="text-2xl font-bold">{dailyReport.assigned}</div>
+                </div>
+                <div className="bg-white p-3 rounded-full shadow-sm text-indigo-500">
+                  <i className="fa-solid fa-book-open"></i>
+                </div>
+              </div>
+              {dailyReport.assignedDetails && dailyReport.assignedDetails.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-indigo-100">
+                  <div className="text-xs font-semibold mb-1 opacity-80">รายละเอียดงาน:</div>
+                  <ul className="space-y-1">
+                    {dailyReport.assignedDetails.map((a: any) => (
+                      <li key={a.id} className="text-xs bg-white/50 px-2 py-1 rounded">
+                        <span className="font-bold">[{a.subject}]</span> {a.title}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-teal-50 text-teal-700 p-4 rounded-xl border border-teal-100">
+              <div className="flex justify-between items-center mb-2">
+                <div>
+                  <div className="text-xs font-bold uppercase mb-1 opacity-70">งานที่ตรวจแล้ววันนี้</div>
+                  <div className="text-2xl font-bold">{dailyReport.submitted}</div>
+                </div>
+                <div className="bg-white p-3 rounded-full shadow-sm text-teal-500">
+                  <i className="fa-solid fa-clipboard-check"></i>
+                </div>
+              </div>
+              {dailyReport.submittedDetails && dailyReport.submittedDetails.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-teal-100 max-h-32 overflow-y-auto">
+                  <div className="text-xs font-semibold mb-1 opacity-80">รายการที่ตรวจ:</div>
+                  <ul className="space-y-1">
+                    {dailyReport.submittedDetails.map((g: any, idx: number) => (
+                      <li key={idx} className="text-xs bg-white/50 px-2 py-1 rounded">
+                        <span className="font-bold">{g.studentName}</span> - [{g.subject}] {g.assignmentTitle}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Report Info */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="font-bold text-lg text-gray-800">
+                รายละเอียดการเข้าเรียน
+                <span className="ml-2 text-sm font-normal text-gray-500">({formatDisplayDate(selectedDate)})</span>
+              </h3>
+              <span className="text-sm text-gray-500">
+                ทั้งหมด {dailyReport.total} คน
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-semibold">
+                  <tr>
+                    <th className="p-4 rounded-tl-lg">ชื่อ-สกุล</th>
+                    {/* Dynamic Subject Headers */}
+                    {dailyReport.subjects && dailyReport.subjects.map((subj: string, idx: number) => (
+                      <th key={subj} className={`p-4 text-center ${idx === dailyReport.subjects.length - 1 ? 'rounded-tr-lg' : ''}`}>
+                        {subj}
+                      </th>
+                    ))}
+                    {!dailyReport.subjects && <th className="p-4 rounded-tr-lg text-center">สถานะ</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {dailyReport.students.map((s: any) => (
+                    <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="p-4 font-medium text-gray-800">{s.name}</td>
+
+                      {/* Dynamic Subject Statuses */}
+                      {dailyReport.subjects ? dailyReport.subjects.map((subj: string) => {
+                        const status = s.attendance[subj];
+                        return (
+                          <td key={subj} className="p-4 text-center">
+                            {renderStatusBadge(status)}
+                          </td>
+                        );
+                      }) : (
+                        // Fallback for old structure if any
+                        <td className="p-4 text-center">
+                          {renderStatusBadge(s.status)}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {dailyReport.students.length === 0 && (
+                    <tr>
+                      <td colSpan={dailyReport.subjects ? dailyReport.subjects.length + 1 : 2} className="p-8 text-center text-gray-400">
+                        ไม่พบข้อมูลนักเรียน
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
+      ) : (
+        <div className="text-center py-12 text-gray-500">
+          กรุณาเลือกห้องเรียนและวันที่เพื่อดูรายงาน
+        </div>
+      )}
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="font-bold text-lg mb-6">รายงานรายวัน</h3>
-          <div className="h-64 flex flex-col items-center justify-center text-gray-400 gap-2">
-            <i className="fa-solid fa-clipboard-list text-4xl text-gray-200"></i>
-            <p className="text-sm">เลือกห้องเรียนเพื่อดูรายงานละเอียด</p>
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-gray-800">ส่งออกรายงาน (CSV)</h3>
+              <button onClick={() => setShowExportModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <i className="fa-solid fa-xmark text-xl"></i>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">เลือกห้องเรียน</label>
+                <select
+                  value={exportClassId}
+                  onChange={(e) => setExportClassId(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none"
+                >
+                  {classrooms.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ตั้งแต่วันที่</label>
+                  <input
+                    type="date"
+                    value={exportStartDate}
+                    onChange={(e) => setExportStartDate(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ถึงวันที่</label>
+                  <input
+                    type="date"
+                    value={exportEndDate}
+                    onChange={(e) => setExportEndDate(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleExport}
+                className="flex-1 py-2.5 rounded-xl bg-pink-500 text-white font-bold hover:bg-pink-600 shadow-lg shadow-pink-200 transition-colors flex justify-center items-center gap-2"
+              >
+                <i className="fa-solid fa-file-export"></i> ส่งออกข้อมูล
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-        <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2">
-          <i className="fa-solid fa-user-clock text-red-500"></i> นักเรียนที่ต้องติดตาม (ขาด/สาย บ่อย)
-        </h3>
-        <table className="w-full text-left border-collapse">
-          <thead className="text-sm text-gray-500 border-b border-gray-100">
-            <tr>
-              <th className="py-3 font-medium">ชื่อ-สกุล</th>
-              <th className="py-3 font-medium">ห้อง</th>
-              <th className="py-3 font-medium">สถานะ</th>
-            </tr>
-          </thead>
-          <tbody className="text-sm divide-y divide-gray-100">
-            {followUpStudents.length > 0 ? (
-              followUpStudents.map((s, idx) => (
-                <tr key={idx}>
-                  <td className="py-3">{s.name}</td>
-                  <td>{s.room}</td>
-                  <td>
-                    <span className={`px-2 py-1 rounded-full text-xs border ${s.type === 'absent'
-                        ? 'bg-red-50 text-red-600 border-red-100'
-                        : 'bg-orange-50 text-orange-600 border-orange-100'
-                      }`}>
-                      {s.status}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={3} className="py-8 text-center text-gray-400">
-                  ไม่พบนักเรียนที่มีความเสี่ยง
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <SuccessModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title={modalType === 'success' ? "เรียบร้อย" : "แจ้งเตือน"}
+        message={modalMessage}
+        type={modalType}
+      />
     </div>
   );
 };
 
 export default Dashboard;
+
+function renderStatusBadge(status: string) {
+  let badgeClass = 'bg-gray-100 text-gray-500';
+  let icon = null;
+  let label = '-';
+
+  switch (status) {
+    case 'present':
+      badgeClass = 'bg-emerald-100 text-emerald-700';
+      icon = <i className="fa-solid fa-check"></i>;
+      label = 'มา';
+      break;
+    case 'absent':
+      badgeClass = 'bg-red-100 text-red-700';
+      icon = <i className="fa-solid fa-xmark"></i>;
+      label = 'ขาด';
+      break;
+    case 'late':
+      badgeClass = 'bg-orange-100 text-orange-700';
+      icon = <i className="fa-regular fa-clock"></i>;
+      label = 'สาย';
+      break;
+    case 'sick':
+      badgeClass = 'bg-purple-100 text-purple-700';
+      icon = <i className="fa-solid fa-bed"></i>;
+      label = 'ป่วย';
+      break;
+    case 'leave':
+      badgeClass = 'bg-blue-100 text-blue-700';
+      icon = <i className="fa-regular fa-file-lines"></i>;
+      label = 'ลา';
+      break;
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${badgeClass}`}>
+      {icon}
+      {label}
+    </span>
+  );
+}
+
