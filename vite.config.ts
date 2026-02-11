@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, './src'),
         'node:stream/web': path.resolve(__dirname, 'src/polyfills/stream-web.ts'),
       }
     },

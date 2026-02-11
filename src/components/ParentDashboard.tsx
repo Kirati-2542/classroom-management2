@@ -3,30 +3,41 @@ import React, { useEffect, useState } from 'react';
 import { User, Student, Classroom, Assignment, Grade } from '../types';
 import { api } from '../services/api';
 import { isDateBeforeToday } from '../utils/dateUtils';
+import { useParams, useNavigate } from 'react-router-dom';
 
 interface ParentDashboardProps {
     user?: User;
-    student?: Student;
+    // student prop removed as we use params or user inference
     onBack?: () => void;
 }
 
-const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, student: propStudent, onBack }) => {
-    const [student, setStudent] = useState<Student | null>(propStudent || null);
+const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
+    const { studentId } = useParams<{ studentId: string }>();
+    const navigate = useNavigate();
+
+    const [student, setStudent] = useState<Student | null>(null);
     const [classroom, setClassroom] = useState<Classroom | null>(null);
     const [assignments, setAssignments] = useState<Assignment[]>([]);
     const [grades, setGrades] = useState<Grade[]>([]);
     const [loading, setLoading] = useState(false);
+    const [attendanceStats, setAttendanceStats] = useState<any>(null);
 
-    // 1. Resolve Student (if user is parent)
+    // 1. Resolve Student
     useEffect(() => {
-        if (propStudent) {
-            setStudent(propStudent);
-            return;
-        }
-        if (user && user.role === 'parent') {
-            const findStudent = async () => {
-                setLoading(true);
-                try {
+        const findStudent = async () => {
+            setLoading(true);
+            try {
+                if (studentId) {
+                    const classes = await api.getClassrooms();
+                    let found: Student | undefined;
+                    for (const c of classes) {
+                        const studs = await api.getStudentsByClass(c.id);
+                        found = studs.find(s => s.id === studentId);
+                        if (found) break;
+                    }
+                    if (found) setStudent(found);
+                } else if (user && user.role === 'parent') {
+                    // Parent View
                     const classes = await api.getClassrooms();
                     for (const c of classes) {
                         const studs = await api.getStudentsByClass(c.id);
@@ -36,13 +47,13 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, student: propSt
                             break;
                         }
                     }
-                } finally {
-                    setLoading(false);
                 }
-            };
-            findStudent();
-        }
-    }, [user, propStudent]);
+            } finally {
+                setLoading(false);
+            }
+        };
+        findStudent();
+    }, [user, studentId]);
 
     // 2. Fetch Class Data
     useEffect(() => {
@@ -71,8 +82,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, student: propSt
         };
         fetchData();
     }, [student]);
-
-    const [attendanceStats, setAttendanceStats] = useState<any>(null);
 
     const displayName = student?.name || user?.studentName || 'บุตรหลานของคุณ';
 
@@ -109,12 +118,12 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, student: propSt
 
     return (
         <div className="animate-fadeIn">
-            {onBack && (
+            {(onBack || studentId) && (
                 <button
-                    onClick={onBack}
+                    onClick={onBack || (() => navigate(-1))}
                     className="mb-4 text-gray-500 hover:text-pink-600 font-medium flex items-center gap-2 transition-colors"
                 >
-                    <i className="fa-solid fa-arrow-left"></i> ย้อนกลับไปหน้ารายชื่อ
+                    <i className="fa-solid fa-arrow-left"></i> ย้อนกลับ
                 </button>
             )}
 
@@ -356,3 +365,4 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, student: propSt
 };
 
 export default ParentDashboard;
+

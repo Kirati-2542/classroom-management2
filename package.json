@@ -13,8 +13,10 @@
     "jsrsasign": "^11.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0",
     "recharts": "^3.5.0",
-    "vite-plugin-node-polyfills": "^0.24.0"
+    "vite-plugin-node-polyfills": "^0.24.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/jsrsasign": "^10.5.15",

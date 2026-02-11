@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { googleSheetsService } from '../services/googleSheets';
 import { User } from '../types';
-import logo from '../src/assets/logo.png';
+import logo from '../assets/logo.png';
 
 interface LoginProps {
   onLogin: (user: User) => void;
   setLoading: (loading: boolean) => void;
 }
+
+type ConnectionStatus = 'checking' | 'connected' | 'error';
 
 const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
   const [activeTab, setActiveTab] = useState<'teacher' | 'parent'>('teacher');
@@ -15,6 +18,26 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
   const [studentId, setStudentId] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [error, setError] = useState('');
+
+  // Connection status
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('checking');
+  const [connectionError, setConnectionError] = useState<string>('');
+
+  const checkConnection = async () => {
+    setConnectionStatus('checking');
+    setConnectionError('');
+    try {
+      await googleSheetsService.init();
+      setConnectionStatus('connected');
+    } catch (err: any) {
+      setConnectionStatus('error');
+      setConnectionError(err.message || 'ไม่สามารถเชื่อมต่อ Server ได้');
+    }
+  };
+
+  useEffect(() => {
+    checkConnection();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,7 +77,59 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
 
         {/* Right Side */}
         <div className="w-full md:w-1/2 p-8 md:p-12 flex flex-col justify-center bg-white">
-          <div className="text-center mb-8">
+          {/* Connection Status Indicator */}
+          <div className="mb-6">
+            <div
+              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all duration-300 ${connectionStatus === 'checking'
+                ? 'bg-amber-50 border border-amber-200'
+                : connectionStatus === 'connected'
+                  ? 'bg-emerald-50 border border-emerald-200'
+                  : 'bg-red-50 border border-red-200'
+                }`}
+            >
+              {connectionStatus === 'checking' && (
+                <>
+                  <div className="w-5 h-5 relative">
+                    <div className="absolute inset-0 border-2 border-amber-300 border-t-amber-500 rounded-full animate-spin"></div>
+                  </div>
+                  <span className="text-sm font-medium text-amber-700">กำลังเชื่อมต่อ Server...</span>
+                </>
+              )}
+              {connectionStatus === 'connected' && (
+                <>
+                  <div className="w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center">
+                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-emerald-700">เชื่อมต่อ Google Sheets สำเร็จ</span>
+                </>
+              )}
+              {connectionStatus === 'error' && (
+                <>
+                  <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-red-700">ไม่สามารถเชื่อมต่อได้</span>
+                    {connectionError && (
+                      <p className="text-xs text-red-500 mt-0.5 truncate">{connectionError}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={checkConnection}
+                    className="ml-2 px-3 py-1 text-xs font-medium bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+                  >
+                    ลองใหม่
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="text-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">เข้าสู่ระบบ</h2>
             <p className="text-gray-500 text-sm mt-1">เลือกประเภทผู้ใช้งาน</p>
           </div>
@@ -98,9 +173,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
               </div>
               <button
                 type="submit"
-                className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-pink-200 transition-all transform hover:-translate-y-0.5"
+                disabled={connectionStatus !== 'connected'}
+                className={`w-full font-bold py-3 rounded-xl shadow-lg transition-all transform ${connectionStatus !== 'connected'
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-gray-100'
+                  : 'bg-pink-500 hover:bg-pink-600 text-white shadow-pink-200 hover:-translate-y-0.5'
+                  }`}
               >
-                เข้าสู่ระบบ (ครู)
+                {connectionStatus !== 'connected' ? 'รอการเชื่อมต่อ...' : 'เข้าสู่ระบบ (ครู)'}
               </button>
             </form>
           ) : (
@@ -125,9 +204,13 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
               </div>
               <button
                 type="submit"
-                className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-0.5"
+                disabled={connectionStatus !== 'connected'}
+                className={`w-full font-bold py-3 rounded-xl shadow-lg transition-all transform ${connectionStatus !== 'connected'
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-gray-100'
+                  : 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-indigo-200 hover:-translate-y-0.5'
+                  }`}
               >
-                เข้าสู่ระบบ (ผู้ปกครอง)
+                {connectionStatus !== 'connected' ? 'รอการเชื่อมต่อ...' : 'เข้าสู่ระบบ (ผู้ปกครอง)'}
               </button>
             </form>
           )}

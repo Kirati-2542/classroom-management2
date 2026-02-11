@@ -4,13 +4,14 @@ import { api } from '../services/api';
 import { Classroom, Student } from '../types';
 import { SuccessModal } from './ui/SuccessModal';
 import { parseInputDate } from '../utils/dateUtils';
+import { useNavigate } from 'react-router-dom';
 
 interface ManageStudentsProps {
   setLoading: (l: boolean) => void;
-  onViewSummary: (student: Student) => void;
 }
 
-const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSummary }) => {
+const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
+  const navigate = useNavigate();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
@@ -411,7 +412,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading, onViewSumma
                     <td className="px-6 py-4 text-sm text-gray-600"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">{getClassName(s.classId)}</span></td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-1">
                       <button
-                        onClick={() => onViewSummary(s)}
+                        onClick={() => navigate(`/students/${s.id}`)}
                         className="text-gray-400 hover:text-indigo-500 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
                         title="ดูสรุปผลการเรียน"
                       >

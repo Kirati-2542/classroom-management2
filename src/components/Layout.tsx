@@ -1,36 +1,43 @@
 import React, { useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { User, UserRole } from '../types';
 import ErrorBoundary from './ErrorBoundary';
-import logo from '../src/assets/logo.png';
+import logo from '../assets/logo.png';
 
 interface LayoutProps {
   user: User;
   onLogout: () => void;
-  currentPage: string;
-  setPage: (page: string) => void;
   children: React.ReactNode;
   schoolSettings?: { schoolName: string; academicYear: string; semester: string };
 }
 
-const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, children, schoolSettings }) => {
+const Layout: React.FC<LayoutProps> = ({ user, onLogout, children, schoolSettings }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
-  const NavItem = ({ page, icon, label }: { page: string; icon: string; label: string }) => (
-    <button
+  const isActive = (path: string) => {
+    // Exact match or sub-paths
+    if (path === '/') return location.pathname === '/' || location.pathname === '/dashboard';
+    return location.pathname.startsWith(path);
+  };
+
+  const NavItem = ({ path, icon, label }: { path: string; icon: string; label: string }) => (
+    <Link
+      to={path}
       onClick={() => {
-        setPage(page);
         if (window.innerWidth < 1024) setSidebarOpen(false);
       }}
-      className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-2 font-medium ${currentPage === page
+      className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-2 font-medium ${isActive(path)
         ? 'bg-pink-100 text-pink-600'
         : 'text-gray-500 hover:bg-pink-50 hover:text-pink-500'
         }`}
     >
       <i className={`${icon} w-5 text-center`}></i>
       <span>{label}</span>
-    </button>
+    </Link>
   );
 
   return (
@@ -77,16 +84,16 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
         <nav className="flex-1 px-4 overflow-y-auto scrollbar-hide">
           {user.role === 'teacher' ? (
             <>
-              <NavItem page="dashboard" icon="fa-solid fa-border-all" label="แดชบอร์ด" />
-              <NavItem page="attendance" icon="fa-solid fa-clipboard-check" label="เช็คชื่อ" />
-              <NavItem page="history" icon="fa-solid fa-clock-rotate-left" label="ประวัติการเช็คชื่อ" />
-              <NavItem page="grading" icon="fa-solid fa-graduation-cap" label="การมอบหมายงาน" />
-              <NavItem page="manage-class" icon="fa-solid fa-chalkboard-user" label="จัดการห้องเรียน" />
-              <NavItem page="manage-students" icon="fa-solid fa-users" label="นักเรียน" />
-              <NavItem page="settings" icon="fa-solid fa-gear" label="ตั้งค่า" />
+              <NavItem path="/" icon="fa-solid fa-border-all" label="แดชบอร์ด" />
+              <NavItem path="/attendance" icon="fa-solid fa-clipboard-check" label="เช็คชื่อ" />
+              <NavItem path="/history" icon="fa-solid fa-clock-rotate-left" label="ประวัติการเช็คชื่อ" />
+              <NavItem path="/grading" icon="fa-solid fa-graduation-cap" label="การมอบหมายงาน" />
+              <NavItem path="/manage-class" icon="fa-solid fa-chalkboard-user" label="จัดการห้องเรียน" />
+              <NavItem path="/manage-students" icon="fa-solid fa-users" label="นักเรียน" />
+              <NavItem path="/settings" icon="fa-solid fa-gear" label="ตั้งค่า" />
             </>
           ) : (
-            <NavItem page="parent-dashboard" icon="fa-solid fa-child-reaching" label="ข้อมูลบุตรหลาน" />
+            <NavItem path="/parent-dashboard" icon="fa-solid fa-child-reaching" label="ข้อมูลบุตรหลาน" />
           )}
         </nav>
 
@@ -124,3 +131,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, currentPage, setPage, c
 };
 
 export default Layout;
+
+
+

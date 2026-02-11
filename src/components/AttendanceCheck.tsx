@@ -1,45 +1,70 @@
 import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { Classroom, Student } from '../types';
-
 import { SuccessModal } from './ui/SuccessModal';
 
 interface AttendanceCheckProps {
-  classroom: Classroom;
-  onBack: () => void;
   setLoading: (l: boolean) => void;
 }
 
-const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, setLoading }) => {
+const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ setLoading }) => {
+  const { classId } = useParams<{ classId: string }>();
+  const navigate = useNavigate();
+  const [classroom, setClassroom] = useState<Classroom | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedSubject, setSelectedSubject] = useState(classroom.subjects?.[0] || 'General'); // Default to first or 'General'
+  const [selectedSubject, setSelectedSubject] = useState('General');
   const [attendance, setAttendance] = useState<Record<string, string>>({});
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   useEffect(() => {
+    if (!classId) return;
     setLoading(true);
-    api.getStudentsByClass(classroom.id)
-      .then(data => {
-        setStudents(data);
-        // Initialize attendance to 'present'
-        const initialStatus: Record<string, string> = {};
-        data.forEach(s => initialStatus[s.id] = 'present');
-        setAttendance(initialStatus);
-      })
-      .finally(() => setLoading(false));
-  }, [classroom.id, setLoading]);
+
+    const loadData = async () => {
+      try {
+        // Fetch All Classrooms to find this one (since we don't have getById yet)
+        const allClassrooms = await api.getClassrooms();
+        const cls = allClassrooms.find(c => c.id === classId);
+        if (cls) {
+          setClassroom(cls);
+          setSelectedSubject(cls.subjects?.[0] || 'General');
+
+          // Fetch Students
+          const studentsData = await api.getStudentsByClass(classId);
+          setStudents(studentsData);
+
+          // Init Attendance
+          const initialStatus: Record<string, string> = {};
+          studentsData.forEach(s => initialStatus[s.id] = 'present');
+          setAttendance(initialStatus);
+        } else {
+          console.error('Classroom not found');
+          navigate('/attendance');
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [classId, setLoading, navigate]);
 
   const handleStatusChange = (studentId: string, status: string) => {
     setAttendance(prev => ({ ...prev, [studentId]: status }));
   };
 
   const submitAttendance = async () => {
+    if (!classroom) return;
     setLoading(true);
     await api.submitAttendance(classroom.id, date, attendance, selectedSubject);
     setLoading(false);
     setShowSuccessModal(true);
   };
+
+  if (!classroom) return null;
 
   return (
     <div className="animate-fadeIn">
@@ -57,8 +82,8 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
                   key={sub}
                   onClick={() => setSelectedSubject(sub)}
                   className={`px-3 py-1 rounded-full text-xs transition-all border ${selectedSubject === sub
-                      ? 'bg-white text-pink-600 font-bold border-white'
-                      : 'bg-white/20 text-white hover:bg-white/30 border-transparent'
+                    ? 'bg-white text-pink-600 font-bold border-white'
+                    : 'bg-white/20 text-white hover:bg-white/30 border-transparent'
                     }`}
                 >
                   {sub}
@@ -152,7 +177,7 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
         </div>
       </div>
 
-      <button onClick={onBack} className="mt-4 text-gray-400 hover:text-gray-600 text-sm flex items-center gap-2">
+      <button onClick={() => navigate('/attendance')} className="mt-4 text-gray-400 hover:text-gray-600 text-sm flex items-center gap-2">
         <i className="fa-solid fa-arrow-left"></i> ย้อนกลับไปหน้ารวมห้องเรียน
       </button>
 
@@ -160,7 +185,7 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ classroom, onBack, se
         isOpen={showSuccessModal}
         onClose={() => {
           setShowSuccessModal(false);
-          // onBack(); // Optional: Go back after success
+          // navigate('/attendance'); // Optional
         }}
         message="บันทึกการเช็คชื่อเรียบร้อยแล้ว"
       />

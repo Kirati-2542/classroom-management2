@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { Classroom } from '../types';
 
 interface AttendanceProps {
-  onSelectClass: (cls: Classroom) => void;
-  onAddClass: () => void;
   setLoading: (l: boolean) => void;
 }
 
-const Attendance: React.FC<AttendanceProps> = ({ onSelectClass, onAddClass, setLoading }) => {
+const Attendance: React.FC<AttendanceProps> = ({ setLoading }) => {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
 
   useEffect(() => {
@@ -33,10 +32,10 @@ const Attendance: React.FC<AttendanceProps> = ({ onSelectClass, onAddClass, setL
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {classrooms.map((c) => (
-          <div
+          <Link
             key={c.id}
-            onClick={() => onSelectClass(c)}
-            className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md cursor-pointer transition-all group"
+            to={`/attendance/${c.id}`}
+            className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md cursor-pointer transition-all group block"
           >
             <div className="flex items-start justify-between mb-4">
               <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-3xl shadow-sm group-hover:scale-110 transition-transform">
@@ -48,18 +47,18 @@ const Attendance: React.FC<AttendanceProps> = ({ onSelectClass, onAddClass, setL
             <div className="flex items-center text-xs text-gray-400 font-medium bg-gray-50 w-fit px-3 py-1 rounded-full">
               <i className="fa-solid fa-user-group mr-2"></i> นักเรียน {c.studentCount} คน
             </div>
-          </div>
+          </Link>
         ))}
 
-        <div
-          onClick={onAddClass}
+        <Link
+          to="/manage-class"
           className="border-2 border-dashed border-gray-200 rounded-2xl p-6 flex flex-col items-center justify-center text-gray-400 hover:border-pink-300 hover:text-pink-500 hover:bg-pink-50/30 transition-all cursor-pointer h-full min-h-[180px]"
         >
           <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3 group-hover:bg-white">
             <i className="fa-solid fa-plus text-lg"></i>
           </div>
           <span className="font-medium text-sm">เพิ่มห้องเรียนใหม่</span>
-        </div>
+        </Link>
       </div>
     </div>
   );

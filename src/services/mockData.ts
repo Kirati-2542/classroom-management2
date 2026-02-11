@@ -7,8 +7,8 @@ export const MOCK_USERS: User[] = [
 ];
 
 export const MOCK_CLASSROOMS: Classroom[] = [
-  { id: 'c1', name: 'ป.1/1', subject: 'คณิตศาสตร์', level: 'ป.1', studentCount: 2, emoji: '📚', teacher: 'ครูสมศรี' },
-  { id: 'c2', name: 'ป.2/2', subject: 'วิทยาศาสตร์', level: 'ป.2', studentCount: 1, emoji: '🧪', teacher: 'ครูสมชาย' }
+  { id: 'c1', name: 'ป.1/1', subjects: ['คณิตศาสตร์'], level: 'ป.1', studentCount: 2, emoji: '📚', teacher: 'ครูสมศรี' },
+  { id: 'c2', name: 'ป.2/2', subjects: ['วิทยาศาสตร์'], level: 'ป.2', studentCount: 1, emoji: '🧪', teacher: 'ครูสมชาย' }
 ];
 
 export const MOCK_STUDENTS: Student[] = [
@@ -24,9 +24,9 @@ const futureDate = new Date();
 futureDate.setDate(today.getDate() + 7);
 
 export const MOCK_ASSIGNMENTS: Assignment[] = [
-  { id: 'a1', classId: 'c1', title: 'การบ้าน #1: การบวกเลข', maxScore: 10, dueDate: pastDate.toISOString().split('T')[0] },
-  { id: 'a2', classId: 'c1', title: 'สอบกลางภาค', maxScore: 50, dueDate: futureDate.toISOString().split('T')[0] },
-  { id: 'a3', classId: 'c1', title: 'แบบฝึกหัดท้ายบท', maxScore: 20, dueDate: pastDate.toISOString().split('T')[0] },
+  { id: 'a1', classId: 'c1', title: 'การบ้าน #1: การบวกเลข', maxScore: 10, dueDate: pastDate.toISOString().split('T')[0], subject: 'คณิตศาสตร์' },
+  { id: 'a2', classId: 'c1', title: 'สอบกลางภาค', maxScore: 50, dueDate: futureDate.toISOString().split('T')[0], subject: 'คณิตศาสตร์' },
+  { id: 'a3', classId: 'c1', title: 'แบบฝึกหัดท้ายบท', maxScore: 20, dueDate: pastDate.toISOString().split('T')[0], subject: 'คณิตศาสตร์' },
 ];
 
 export const MOCK_GRADES: Grade[] = [

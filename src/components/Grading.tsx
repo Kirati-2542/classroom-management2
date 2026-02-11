@@ -331,17 +331,14 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
     setLoading(true);
     try {
       for (const newAsg of pendingNewAssignments) {
-        for (const newAsg of pendingNewAssignments) {
-          await api.addAssignment({
-            classId: selectedClassId,
-            title: newAsg.name,
-            maxScore: 10, // Default max score for imported? Or checklist? Let's assume Score if imported from grades, but maybe Checklist safe?
-            // Actually if importing CSV with scores, usually 'score'.
-            dueDate: '',
-            subject: selectedSubject,
-            type: 'score'
-          });
-        }
+        await api.addAssignment({
+          classId: selectedClassId,
+          title: newAsg.name,
+          maxScore: 10,
+          dueDate: '',
+          subject: selectedSubject,
+          type: 'score'
+        });
       }
       // Proceed with import
       await executeImport(pendingCsvLines);
