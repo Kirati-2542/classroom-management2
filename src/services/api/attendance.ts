@@ -1,29 +1,47 @@
-import { googleSheetsService } from '../googleSheets';
+import { supabase } from '../supabase';
 import { attendance, setAttendance, students, classrooms, assignments, grades, initPromise } from './state';
-import { delay } from './core'; // or util
+import { delay } from './core';
 import { normalizeDate } from '../../utils/dateUtils';
-import { getClassrooms } from './classrooms'; // Cross-module import
+import { getClassrooms } from './classrooms';
 
 export const submitAttendance = async (classId: string, date: string, data: any, subject: string): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(800);
     try {
-        await googleSheetsService.saveAttendanceBatch(classId, date, data, subject);
+        const records = Object.entries(data).map(([studentId, status]) => ({
+            id: `${studentId}_${date}_${subject}`,
+            class_id: classId,
+            date,
+            student_id: studentId,
+            status: status as string,
+            subject
+        }));
+
+        const { error } = await supabase
+            .from('attendance')
+            .upsert(records);
+
+        if (error) throw error;
 
         // Update local cache
-        Object.entries(data).forEach(([studentId, status]) => {
-            // Correct type casting for status
-            const s = status as string;
+        records.forEach(record => {
             const existingIndex = attendance.findIndex(a =>
                 a.classId === classId &&
-                a.studentId === studentId &&
+                a.studentId === record.student_id &&
                 a.date === date &&
                 (a.subject || 'General') === subject
             );
             if (existingIndex >= 0) {
-                attendance[existingIndex].status = s;
+                attendance[existingIndex].status = record.status;
             } else {
-                attendance.push({ classId, date, studentId, status: s, subject });
+                attendance.push({
+                    id: record.id,
+                    classId: record.class_id,
+                    studentId: record.student_id,
+                    date: record.date,
+                    status: record.status,
+                    subject: record.subject
+                });
             }
         });
 
@@ -36,8 +54,15 @@ export const submitAttendance = async (classId: string, date: string, data: any,
 export const deleteAttendanceDate = async (classId: string, date: string): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(500);
-    await googleSheetsService.deleteAttendance(classId, date);
-    // Update local cache
+
+    const { error } = await supabase
+        .from('attendance')
+        .delete()
+        .eq('class_id', classId)
+        .eq('date', date);
+
+    if (error) throw error;
+
     setAttendance(attendance.filter(a => !(a.classId === classId && a.date === date)));
 };
 
@@ -45,35 +70,40 @@ export const getAttendanceHistory = async (classId: string, subject: string = 'G
     if (initPromise) await initPromise;
     await delay(600);
 
-    // Refresh to get latest - Note: Original called googleSheetsService.getAttendance() directly
-    // This updates local variable 'attendance' in api.ts scope.
-    // We should do the same here using setAttendance
-    const freshAttendance = await googleSheetsService.getAttendance();
-    setAttendance(freshAttendance);
+    const { data: freshAttendance, error } = await supabase
+        .from('attendance')
+        .select('*');
 
+    if (!error && freshAttendance) {
+        const mapped = freshAttendance.map((a: any) => ({
+            id: a.id,
+            classId: a.class_id,
+            studentId: a.student_id,
+            date: a.date,
+            status: a.status,
+            subject: a.subject
+        }));
+        setAttendance(mapped);
+    }
+
+    const currentAttendance = freshAttendance || attendance;
     const classStudents = students.filter(s => s.classId === classId);
 
-    // Filter by subject matches or default 'General' if undefined in DB
-    const subjectAttendance = freshAttendance.filter(a =>
+    const subjectAttendance = currentAttendance.filter(a =>
         a.classId === classId &&
         (a.subject || 'General') === subject
     );
 
-    // Generate dates
     const rawDates = subjectAttendance.map(a => a.date);
     const normalizedDatesSet = new Set(rawDates.map(d => normalizeDate(d)));
     const existingDates = Array.from(normalizedDatesSet);
 
-    // If no data, provide some default dates
     let dates = existingDates;
-
-    // Sort dates
     dates.sort();
 
     const historyData = classStudents.map((s, i) => {
         const studentAttendance = subjectAttendance.filter(a => a.studentId === s.id);
         const studentStatuses = dates.map(d => {
-            // Find record that matches this normalized date
             const record = studentAttendance.find(a => normalizeDate(a.date) === d);
             return record ? record.status : '-';
         });
@@ -93,13 +123,24 @@ export const updateAttendanceHistory = async (classId: string, studentId: string
     if (initPromise) await initPromise;
     await delay(200);
 
-    const history = await getAttendanceHistory(classId, subject); // Pass subject
+    const history = await getAttendanceHistory(classId, subject);
     const date = history.dates[dateIndex];
 
     if (date) {
-        await googleSheetsService.updateAttendance(classId, date, studentId, status, subject);
+        const record = {
+            id: `${studentId}_${date}_${subject}`,
+            class_id: classId,
+            date,
+            student_id: studentId,
+            status,
+            subject
+        };
+        const { error } = await supabase
+            .from('attendance')
+            .upsert(record);
 
-        // Update local cache
+        if (error) throw error;
+
         const existingIndex = attendance.findIndex(a =>
             a.classId === classId &&
             a.studentId === studentId &&
@@ -120,14 +161,23 @@ export const updateAttendanceHistoryBatch = async (updates: { classId: string, s
     if (initPromise) await initPromise;
     await delay(200);
 
-    // Process updates
+    const dbData = updates.map(u => ({
+        id: `${u.studentId}_${u.date}_${u.subject}`,
+        class_id: u.classId,
+        date: u.date,
+        student_id: u.studentId,
+        status: u.status,
+        subject: u.subject
+    }));
+
+    const { error } = await supabase
+        .from('attendance')
+        .upsert(dbData);
+
+    if (error) throw error;
+
     for (const update of updates) {
         const { classId, studentId, date, status, subject } = update;
-
-        // Update google sheets
-        await googleSheetsService.updateAttendance(classId, date, studentId, status, subject);
-
-        // Update local cache
         const existingIndex = attendance.findIndex(a =>
             a.classId === classId &&
             a.studentId === studentId &&
@@ -149,11 +199,16 @@ export const getStudentAttendanceStats = async (studentId: string, classId: stri
     if (initPromise) await initPromise;
     await delay(500);
 
-    // Ensure we have latest data
-    const freshAttendance = await googleSheetsService.getAttendance();
-    setAttendance(freshAttendance);
+    const { data: freshAttendance, error } = await supabase
+        .from('attendance')
+        .select('*');
 
-    const studentRecords = freshAttendance.filter(a => a.classId === classId && a.studentId === studentId);
+    if (!error && freshAttendance) {
+        setAttendance(freshAttendance);
+    }
+
+    const currentAttendance = freshAttendance || attendance;
+    const studentRecords = currentAttendance.filter(a => a.classId === classId && a.studentId === studentId);
 
     const total = studentRecords.length;
     const present = studentRecords.filter(a => a.status === 'present').length;
@@ -165,7 +220,6 @@ export const getStudentAttendanceStats = async (studentId: string, classId: stri
     const attendCount = present + late;
     const percent = total > 0 ? Math.round((attendCount / total) * 100) : 0;
 
-    // Get today's status
     const today = new Date().toISOString().split('T')[0];
     const todayRecord = studentRecords.find(a => a.date === today);
     const todayStatus = todayRecord ? todayRecord.status : 'unknown';
@@ -186,28 +240,22 @@ export const getClassroomDailyReport = async (classId: string, date: string, sub
     if (initPromise) await initPromise;
     await delay(300);
 
-    // 1. Get all subjects for this class
     const _classrooms = await getClassrooms();
     const cls = _classrooms.find(c => c.id === classId);
     const allSubjects = cls?.subjects && cls.subjects.length > 0 ? cls.subjects : ['General'];
 
-    // 2. Fetch history for ALL subjects in parallel
     const historyPromises = allSubjects.map(subj => getAttendanceHistory(classId, subj));
     const histories = await Promise.all(historyPromises);
 
-    // 3. Normalize Date
     const normalizedTarget = normalizeDate(date);
-
-    // 4. Build Student Map
     const baseHistory = histories[0] || { students: [], dates: [] };
 
     const studentMap = new Map<string, { id: string, name: string, no: number, attendance: Record<string, string> }>();
 
     baseHistory.students.forEach(s => {
-        studentMap.set(s.id, { id: s.id, name: s.name, no: s.no || 0, attendance: {} }); // no: 0 fallback
+        studentMap.set(s.id, { id: s.id, name: s.name, no: s.no || 0, attendance: {} });
     });
 
-    // Populate attendance for each subject
     histories.forEach((hist, index) => {
         const subj = allSubjects[index];
         const dateIdx = hist.dates.findIndex(d => normalizeDate(d) === normalizedTarget);
@@ -228,7 +276,6 @@ export const getClassroomDailyReport = async (classId: string, date: string, sub
         attendance: s.attendance
     }));
 
-    // 5. Calculate Stats
     const primarySubject = allSubjects.includes(subject) ? subject : allSubjects[0];
     const statsStudents = studentsStatus.map(s => ({
         status: s.attendance[primarySubject] || '-'
@@ -242,7 +289,6 @@ export const getClassroomDailyReport = async (classId: string, date: string, sub
         leave: statsStudents.filter(s => s.status === 'leave').length,
     };
 
-    // Calculate Assignment Stats
     const classAssignments = assignments.filter(a => a.classId === classId);
 
     const assignedTodayList = classAssignments

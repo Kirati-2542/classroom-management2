@@ -24,7 +24,7 @@ export const ClassroomSchema = z.object({
     name: z.string(),
     subjects: z.array(z.string()),
     level: z.string(),
-    studentCount: z.coerce.number(), // Coerce in case it comes as string
+    studentCount: z.coerce.number().optional().default(0),
     emoji: z.string(),
     teacher: z.string(),
 });

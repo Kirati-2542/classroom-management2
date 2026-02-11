@@ -1,4 +1,4 @@
-import { googleSheetsService } from '../googleSheets';
+import { supabase } from '../supabase';
 import {
     attendance, students, classrooms,
     setAttendance, setStudents, setClassrooms,
@@ -10,21 +10,24 @@ export const getDashboardStats = async () => {
     if (initPromise) await initPromise;
     await delay(800);
 
-    // Refresh data and update cache
-    const _attendance = await googleSheetsService.getAttendance();
-    const _students = await googleSheetsService.getStudents();
-    const _classrooms = await googleSheetsService.getClassrooms();
+    // Refresh data and update cache from Supabase
+    const [
+        { data: _attendance },
+        { data: _students },
+        { data: _classrooms }
+    ] = await Promise.all([
+        supabase.from('attendance').select('*'),
+        supabase.from('students').select('*'),
+        supabase.from('classrooms').select('*')
+    ]);
 
-    setAttendance(_attendance);
-    setStudents(_students);
-    setClassrooms(_classrooms);
+    if (_attendance) setAttendance(_attendance);
+    if (_students) setStudents(_students);
+    if (_classrooms) setClassrooms(_classrooms);
 
-    // Use the local variables which are now references to the updated arrays (imported ones are live)
-    // BUT in this function scope, we can use the returned values directly for calculation to be safe/synchronous
-    // References:
-    const attRef = _attendance;
-    const stuRef = _students;
-    const clsRef = _classrooms;
+    const attRef = _attendance || attendance;
+    const stuRef = _students || students;
+    const clsRef = _classrooms || classrooms;
 
     // 1. Overall Stats
     const totalRecords = attRef.length;
@@ -47,7 +50,6 @@ export const getDashboardStats = async () => {
     const absentRate = Math.round((absentCount / totalRecords) * 100);
 
     // 2. Chart Data (Last 5 days with data)
-    // Group by date
     const dateGroups = attRef.reduce((acc, curr) => {
         if (!acc[curr.date]) acc[curr.date] = { total: 0, present: 0 };
         acc[curr.date].total++;
@@ -66,7 +68,7 @@ export const getDashboardStats = async () => {
         };
     });
 
-    // 3. Follow Up Students (More than 2 absences or lates)
+    // 3. Follow Up Students
     const studentStats = stuRef.map(s => {
         const sRecords = attRef.filter(a => a.studentId === s.id);
         const sAbsent = sRecords.filter(a => a.status === 'absent').length;
@@ -91,7 +93,7 @@ export const getDashboardStats = async () => {
                 type: s.sAbsent >= 2 ? 'absent' : 'late'
             };
         })
-        .slice(0, 5); // Top 5
+        .slice(0, 5);
 
     return {
         attendanceRate,

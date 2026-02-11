@@ -1,5 +1,5 @@
 import { Classroom } from '../../types';
-import { googleSheetsService } from '../googleSheets';
+import { supabase } from '../supabase';
 import { classrooms, students, setClassrooms, initPromise } from './state';
 import { delay } from './core';
 
@@ -16,11 +16,21 @@ export const getClassrooms = async (): Promise<Classroom[]> => {
 export const addClassroom = async (classroom: Omit<Classroom, 'id'>): Promise<Classroom> => {
     if (initPromise) await initPromise;
     await delay(500);
-    const newClass = { ...classroom, id: `c${Date.now()}` };
-    await googleSheetsService.addClassroom(newClass);
-    // classrooms is mutable array, push works if we don't reassign
-    classrooms.push(newClass);
-    return newClass;
+    const newId = `c${Date.now()}`;
+    const newClass = { ...classroom, id: newId };
+    const { studentCount, ...dbData } = newClass;
+
+    const { error } = await supabase
+        .from('classrooms')
+        .insert(dbData);
+
+    if (error) {
+        console.error("Add classroom error:", error);
+        throw error;
+    }
+
+    classrooms.push(newClass as Classroom);
+    return newClass as Classroom;
 };
 
 export const updateClassroom = async (id: string, data: Partial<Classroom>): Promise<void> => {
@@ -28,9 +38,19 @@ export const updateClassroom = async (id: string, data: Partial<Classroom>): Pro
     await delay(500);
     const existing = classrooms.find(c => c.id === id);
     if (existing) {
+        const { studentCount: _, ...dbData } = data;
         const updated = { ...existing, ...data };
-        await googleSheetsService.updateClassroom(updated);
-        // Reassign using setter because .map creates new array
+
+        const { error } = await supabase
+            .from('classrooms')
+            .update(dbData)
+            .eq('id', id);
+
+        if (error) {
+            console.error("Update classroom error:", error);
+            throw error;
+        }
+
         setClassrooms(classrooms.map(c => c.id === id ? updated : c));
     }
 };
@@ -38,7 +58,16 @@ export const updateClassroom = async (id: string, data: Partial<Classroom>): Pro
 export const deleteClassroom = async (id: string): Promise<void> => {
     if (initPromise) await initPromise;
     await delay(500);
-    await googleSheetsService.deleteClassroom(id);
-    // Reassign using setter
+
+    const { error } = await supabase
+        .from('classrooms')
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        console.error("Delete classroom error:", error);
+        throw error;
+    }
+
     setClassrooms(classrooms.filter(c => c.id !== id));
 };

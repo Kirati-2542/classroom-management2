@@ -13,6 +13,8 @@ export interface User {
 export interface Student {
   id: string;
   name: string;
+  nickname?: string;
+  studentId?: string;
   classId: string;
   dob: string;
   parentName?: string;

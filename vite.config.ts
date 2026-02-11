@@ -34,6 +34,8 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_GOOGLE_SHEET_ID': JSON.stringify(env.VITE_GOOGLE_SHEET_ID),
       'import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL': JSON.stringify(env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL),
       'import.meta.env.VITE_GOOGLE_PRIVATE_KEY': JSON.stringify(env.VITE_GOOGLE_PRIVATE_KEY),
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY),
     },
   };
 });
