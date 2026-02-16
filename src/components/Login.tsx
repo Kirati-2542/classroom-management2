@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { googleSheetsService } from '../services/googleSheets';
+import { supabase } from '../services/supabase';
 import { User } from '../types';
 import logo from '../assets/logo.png';
 
@@ -27,7 +27,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
     setConnectionStatus('checking');
     setConnectionError('');
     try {
-      await googleSheetsService.init();
+      const { error } = await supabase.from('settings').select('key').limit(1);
+      if (error) throw error;
       setConnectionStatus('connected');
     } catch (err: any) {
       setConnectionStatus('error');
@@ -102,7 +103,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <span className="text-sm font-medium text-emerald-700">เชื่อมต่อ Google Sheets สำเร็จ</span>
+                  <span className="text-sm font-medium text-emerald-700">เชื่อมต่อ Server สำเร็จ</span>
                 </>
               )}
               {connectionStatus === 'error' && (

@@ -260,7 +260,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
   const handleExportCSV = async () => {
     setLoading(true);
     try {
-      // Fetch fresh data from Google Sheets
+      // Fetch fresh data from Supabase
       const freshStudents = await api.getStudentsByClass(selectedClassId, true);
 
       if (!freshStudents.length) {
