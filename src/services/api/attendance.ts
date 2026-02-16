@@ -1,12 +1,12 @@
 import { supabase } from '../supabase';
 import { attendance, setAttendance, students, classrooms, assignments, grades, initPromise } from './state';
-import { delay } from './core';
+
 import { normalizeDate } from '../../utils/dateUtils';
 import { getClassrooms } from './classrooms';
 
 export const submitAttendance = async (classId: string, date: string, data: any, subject: string): Promise<void> => {
     if (initPromise) await initPromise;
-    await delay(800);
+
     try {
         const records = Object.entries(data).map(([studentId, status]) => ({
             id: `${studentId}_${date}_${subject}`,
@@ -53,7 +53,7 @@ export const submitAttendance = async (classId: string, date: string, data: any,
 
 export const deleteAttendanceDate = async (classId: string, date: string): Promise<void> => {
     if (initPromise) await initPromise;
-    await delay(500);
+
 
     const { error } = await supabase
         .from('attendance')
@@ -68,7 +68,7 @@ export const deleteAttendanceDate = async (classId: string, date: string): Promi
 
 export const getAttendanceHistory = async (classId: string, subject: string = 'General') => {
     if (initPromise) await initPromise;
-    await delay(600);
+
 
     const { data: freshAttendance, error } = await supabase
         .from('attendance')
@@ -86,7 +86,8 @@ export const getAttendanceHistory = async (classId: string, subject: string = 'G
         setAttendance(mapped);
     }
 
-    const currentAttendance = freshAttendance || attendance;
+    // Always use the mapped (camelCase) cache, not raw Supabase data
+    const currentAttendance = attendance;
     const classStudents = students.filter(s => s.classId === classId);
 
     const subjectAttendance = currentAttendance.filter(a =>
@@ -121,7 +122,7 @@ export const getAttendanceHistory = async (classId: string, subject: string = 'G
 
 export const updateAttendanceHistory = async (classId: string, studentId: string, dateIndex: number, status: string, subject: string = 'General') => {
     if (initPromise) await initPromise;
-    await delay(200);
+
 
     const history = await getAttendanceHistory(classId, subject);
     const date = history.dates[dateIndex];
@@ -159,7 +160,7 @@ export const updateAttendanceHistory = async (classId: string, studentId: string
 
 export const updateAttendanceHistoryBatch = async (updates: { classId: string, studentId: string, date: string, status: string, subject: string }[]) => {
     if (initPromise) await initPromise;
-    await delay(200);
+
 
     const dbData = updates.map(u => ({
         id: `${u.studentId}_${u.date}_${u.subject}`,
@@ -197,18 +198,27 @@ export const updateAttendanceHistoryBatch = async (updates: { classId: string, s
 
 export const getStudentAttendanceStats = async (studentId: string, classId: string) => {
     if (initPromise) await initPromise;
-    await delay(500);
+
 
     const { data: freshAttendance, error } = await supabase
         .from('attendance')
         .select('*');
 
     if (!error && freshAttendance) {
-        setAttendance(freshAttendance);
+        // Map snake_case to camelCase before caching
+        const mapped = freshAttendance.map((a: any) => ({
+            id: a.id,
+            classId: a.class_id,
+            studentId: a.student_id,
+            date: a.date,
+            status: a.status,
+            subject: a.subject
+        }));
+        setAttendance(mapped);
     }
 
-    const currentAttendance = freshAttendance || attendance;
-    const studentRecords = currentAttendance.filter(a => a.classId === classId && a.studentId === studentId);
+    // Always use the mapped (camelCase) cache
+    const studentRecords = attendance.filter(a => a.classId === classId && a.studentId === studentId);
 
     const total = studentRecords.length;
     const present = studentRecords.filter(a => a.status === 'present').length;
@@ -238,7 +248,7 @@ export const getStudentAttendanceStats = async (studentId: string, classId: stri
 
 export const getClassroomDailyReport = async (classId: string, date: string, subject: string = 'General') => {
     if (initPromise) await initPromise;
-    await delay(300);
+
 
     const _classrooms = await getClassrooms();
     const cls = _classrooms.find(c => c.id === classId);

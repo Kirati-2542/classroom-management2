@@ -1,11 +1,11 @@
 import { Classroom } from '../../types';
 import { supabase } from '../supabase';
 import { classrooms, students, setClassrooms, initPromise } from './state';
-import { delay } from './core';
+
 
 export const getClassrooms = async (): Promise<Classroom[]> => {
     if (initPromise) await initPromise;
-    await delay(500);
+
     // Calculate student count dynamically to ensure accuracy
     return classrooms.map(c => ({
         ...c,
@@ -15,7 +15,7 @@ export const getClassrooms = async (): Promise<Classroom[]> => {
 
 export const addClassroom = async (classroom: Omit<Classroom, 'id'>): Promise<Classroom> => {
     if (initPromise) await initPromise;
-    await delay(500);
+
     const newId = `c${Date.now()}`;
     const newClass = { ...classroom, id: newId };
     const { studentCount, ...dbData } = newClass;
@@ -35,7 +35,7 @@ export const addClassroom = async (classroom: Omit<Classroom, 'id'>): Promise<Cl
 
 export const updateClassroom = async (id: string, data: Partial<Classroom>): Promise<void> => {
     if (initPromise) await initPromise;
-    await delay(500);
+
     const existing = classrooms.find(c => c.id === id);
     if (existing) {
         const { studentCount: _, ...dbData } = data;
@@ -57,7 +57,7 @@ export const updateClassroom = async (id: string, data: Partial<Classroom>): Pro
 
 export const deleteClassroom = async (id: string): Promise<void> => {
     if (initPromise) await initPromise;
-    await delay(500);
+
 
     const { error } = await supabase
         .from('classrooms')

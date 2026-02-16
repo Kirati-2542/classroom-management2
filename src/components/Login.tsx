@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { supabase } from '../services/supabase';
 import { User } from '../types';
 import logo from '../assets/logo.png';
+import ThaiDatePicker from './ui/ThaiDatePicker';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -195,11 +196,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, setLoading }) => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">วันเดือนปีเกิด (ค.ศ.)</label>
-                <input
-                  type="date"
+                <label className="block text-sm font-medium text-gray-700 mb-1">วันเดือนปีเกิด (พ.ศ.)</label>
+                <ThaiDatePicker
                   value={birthDate}
-                  onChange={(e) => setBirthDate(e.target.value)}
+                  onChange={(val) => setBirthDate(val)}
                   className="w-full pl-4 pr-4 py-3 rounded-xl border border-gray-200 focus:border-pink-500 outline-none transition-colors"
                 />
               </div>

@@ -25,11 +25,21 @@ export const formatDisplayDate = (dateStr: string | undefined): string => {
         const date = new Date(dateStr);
         if (isNaN(date.getTime())) return dateStr;
 
-        return date.toLocaleDateString('th-TH', {
-            day: 'numeric',
-            month: 'short',
-            year: '2-digit'
-        });
+        const day = date.getDate();
+        const month = date.getMonth();
+        const year = date.getFullYear();
+
+        const THAI_MONTHS_SHORT = [
+            'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.',
+            'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.',
+            'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+        ];
+
+        // If year is already BE (roughly > 2400), use it as is.
+        // If year is CE (e.g. 2024), convert to BE (+543).
+        const thaiYear = year > 2400 ? year : year + 543;
+
+        return `${day} ${THAI_MONTHS_SHORT[month]} ${thaiYear}`;
     } catch (e) {
         return dateStr;
     }

@@ -4,26 +4,52 @@ import {
     setAttendance, setStudents, setClassrooms,
     initPromise
 } from './state';
-import { delay } from './core';
+
 
 export const getDashboardStats = async () => {
     if (initPromise) await initPromise;
-    await delay(800);
+
 
     // Refresh data and update cache from Supabase
     const [
-        { data: _attendance },
-        { data: _students },
-        { data: _classrooms }
+        { data: _rawAttendance },
+        { data: _rawStudents },
+        { data: _rawClassrooms }
     ] = await Promise.all([
         supabase.from('attendance').select('*'),
         supabase.from('students').select('*'),
         supabase.from('classrooms').select('*')
     ]);
 
-    if (_attendance) setAttendance(_attendance);
-    if (_students) setStudents(_students);
-    if (_classrooms) setClassrooms(_classrooms);
+    // Map snake_case → camelCase before caching
+    const _attendance = (_rawAttendance || []).map((a: any) => ({
+        id: a.id,
+        classId: a.class_id,
+        studentId: a.student_id,
+        date: a.date,
+        status: a.status,
+        subject: a.subject
+    }));
+
+    const _students = (_rawStudents || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        nickname: s.nickname,
+        studentId: s.student_id,
+        classId: s.class_id,
+        dob: s.dob,
+        parentName: s.parent_name,
+        parentPhone: s.parent_phone
+    }));
+
+    const _classrooms = (_rawClassrooms || []).map((c: any) => ({
+        ...c,
+        studentCount: 0 // Will be recalculated below
+    }));
+
+    if (_rawAttendance) setAttendance(_attendance);
+    if (_rawStudents) setStudents(_students);
+    if (_rawClassrooms) setClassrooms(_classrooms);
 
     const attRef = _attendance || attendance;
     const stuRef = _students || students;

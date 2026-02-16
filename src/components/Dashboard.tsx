@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { Classroom } from '../types';
 import { normalizeDate, formatDisplayDate } from '../utils/dateUtils';
 import { SuccessModal } from './ui/SuccessModal';
+import ThaiDatePicker from './ui/ThaiDatePicker';
 
 const Dashboard: React.FC = () => {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -296,14 +297,11 @@ const Dashboard: React.FC = () => {
           <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
             <i className="fa-regular fa-calendar text-pink-400"></i> เลือกวันที่
           </label>
-          <div className="relative">
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full bg-gray-50 border-2 border-transparent hover:bg-white hover:border-pink-200 focus:bg-white focus:border-pink-500 rounded-xl px-4 py-3 text-gray-700 focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all cursor-pointer"
-            />
-          </div>
+          <ThaiDatePicker
+            value={selectedDate}
+            onChange={(val) => setSelectedDate(val)}
+            className="w-full bg-gray-50 border-2 border-transparent hover:bg-white hover:border-pink-200 focus:bg-white focus:border-pink-500 rounded-xl px-4 py-3 text-gray-700 focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all cursor-pointer"
+          />
         </div>
       </div>
 
@@ -504,19 +502,17 @@ const Dashboard: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ตั้งแต่วันที่</label>
-                  <input
-                    type="date"
+                  <ThaiDatePicker
                     value={exportStartDate}
-                    onChange={(e) => setExportStartDate(e.target.value)}
+                    onChange={(val) => setExportStartDate(val)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ถึงวันที่</label>
-                  <input
-                    type="date"
+                  <ThaiDatePicker
                     value={exportEndDate}
-                    onChange={(e) => setExportEndDate(e.target.value)}
+                    onChange={(val) => setExportEndDate(val)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none"
                   />
                 </div>

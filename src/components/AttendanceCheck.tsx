@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { Classroom, Student } from '../types';
 import { SuccessModal } from './ui/SuccessModal';
+import ThaiDatePicker from './ui/ThaiDatePicker';
 
 interface AttendanceCheckProps {
   setLoading: (l: boolean) => void;
@@ -98,10 +99,9 @@ const AttendanceCheck: React.FC<AttendanceCheckProps> = ({ setLoading }) => {
         </div>
         <div className="relative z-10 text-right">
           <label className="block text-xs text-pink-100 mb-1 font-medium">เลือกวันที่เช็คชื่อ</label>
-          <input
-            type="date"
+          <ThaiDatePicker
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(val) => setDate(val)}
             className="bg-white/90 border-none text-sm rounded-lg px-4 py-2 font-medium text-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-pink-300"
           />
         </div>

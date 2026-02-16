@@ -3,7 +3,9 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { Classroom, Student } from '../types';
 import { SuccessModal } from './ui/SuccessModal';
-import { parseInputDate } from '../utils/dateUtils';
+import { AlertModal } from './ui/AlertModal';
+import ThaiDatePicker from './ui/ThaiDatePicker';
+import { parseInputDate, formatDisplayDate } from '../utils/dateUtils';
 import { useNavigate } from 'react-router-dom';
 
 interface ManageStudentsProps {
@@ -33,6 +35,24 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
   // Success Modal State
   const [successModalOpen, setSuccessModalOpen] = useState(false);
   const [successModalMessage, setSuccessModalMessage] = useState('');
+
+  // Alert Modal State
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: React.ReactNode;
+    type: 'success' | 'error' | 'warning' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
+  const showAlert = (title: string, message: React.ReactNode, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setAlertConfig({ isOpen: true, title, message, type });
+  };
+
 
   useEffect(() => {
     setLoading(true);
@@ -109,7 +129,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
       setIsDeleteModalOpen(false);
       setStudentToDelete(null);
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาดในการลบ: " + (err.message || err));
+      showAlert("เกิดข้อผิดพลาด", "ไม่สามารถลบข้อมูลได้: " + (err.message || err), 'error');
     } finally {
       setLoading(false);
     }
@@ -144,7 +164,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
         setSelectedClassId(classId);
       }
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาด: " + err.message);
+      showAlert("เกิดข้อผิดพลาด", "บันทึกข้อมูลไม่สำเร็จ: " + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -206,10 +226,15 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
       const targetClassId = selectedClassId || classrooms[0]?.id;
 
       if (!targetClassId) {
-        alert("กรุณาเลือกห้องเรียนก่อนนำเข้าข้อมูล หรือระบุคอลัมน์ classId ในไฟล์ CSV");
+        showAlert("กรุณาเลือกห้องเรียน", "ต้องเลือกห้องเรียนก่อนนำเข้าข้อมูล หรือระบุคอลัมน์ classId ในไฟล์ CSV", 'warning');
         setLoading(false);
         return;
       }
+
+      // Fetch ALL students once to check for ID conflicts across classrooms
+      const allStudents = await api.getStudentsByClass('');
+
+      const conflictIds: string[] = [];
 
       for (let i = 1; i < lines.length; i++) {
         if (!lines[i].trim()) continue;
@@ -225,32 +250,55 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
         const name = getCol('name') || getCol('ชื่อ');
 
         if (id && name) {
+          // Check if this ID already exists in a DIFFERENT classroom
+          const existingStudent = allStudents.find(s => s.id === id);
+          if (existingStudent && existingStudent.classId !== targetClassId) {
+            conflictIds.push(id);
+            continue; // Skip this student — don't overwrite another classroom's data
+          }
+
           updates.push({
             id,
             name,
-            classId: getCol('classId') || targetClassId,
-            dob: parseInputDate(getCol('dob') || ''),
-            parentName: getCol('parentName') || getCol('ผู้ปกครอง') || '',
-            parentPhone: getCol('parentPhone') || getCol('เบอร์โทร') || ''
+            nickname: getCol('nickname') || getCol('ชื่อเล่น') || existingStudent?.nickname || '',
+            studentId: getCol('student_id') || getCol('เลขประจำตัว') || existingStudent?.studentId || '',
+            classId: targetClassId,
+            dob: parseInputDate(getCol('dob') || getCol('วันเกิด') || '') || existingStudent?.dob || '',
+            parentName: getCol('parentName') || getCol('ผู้ปกครอง') || existingStudent?.parentName || '',
+            parentPhone: getCol('parentPhone') || getCol('เบอร์โทร') || existingStudent?.parentPhone || ''
           });
         }
       }
 
+      // Warn user about conflicts
+      if (conflictIds.length > 0) {
+        showAlert(
+          "พบรหัสนักเรียนซ้ำ",
+          <>
+            <div className="font-bold text-gray-800 mb-2">ข้ามนักเรียน {conflictIds.length} คน เนื่องจากรหัสซ้ำกับห้องอื่น:</div>
+            <div className="bg-gray-50 p-3 rounded-lg text-xs font-mono text-gray-600 mb-2 break-all border border-gray-200">
+              {conflictIds.join(', ')}
+            </div>
+            <div className="text-amber-600 text-xs">กรุณาตรวจสอบและแก้ไขไฟล์ CSV ให้ถูกต้อง</div>
+          </>,
+          'warning'
+        );
+      }
+
       if (updates.length > 0) {
-        await api.updateStudentsBatch(updates);
-        if (selectedClassId) {
-          const updated = await api.getStudentsByClass(selectedClassId);
-          setStudents(updated);
-        }
-        setSuccessModalMessage(`นำเข้าข้อมูลสำเร็จ ${updates.length} รายการ`);
+        await api.updateStudentsBatch(updates, targetClassId);
+        // Force refresh from Supabase to ensure accurate data
+        const updated = await api.getStudentsByClass(targetClassId, true);
+        setStudents(updated);
+        setSuccessModalMessage(`นำเข้าข้อมูลสำเร็จ ${updates.length} รายการ` + (conflictIds.length > 0 ? ` (ข้าม ${conflictIds.length} รายการที่ซ้ำ)` : ''));
         setSuccessModalOpen(true);
       } else {
-        alert("ไม่พบข้อมูลที่สามารถนำเข้าได้ กรุณาตรวจสอบไฟล์ CSV");
+        showAlert("ไม่พบข้อมูล", "ไม่พบข้อมูลที่สามารถนำเข้าได้ กรุณาตรวจสอบไฟล์ CSV", 'info');
       }
 
     } catch (err) {
       console.error(err);
-      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV");
+      showAlert("เกิดข้อผิดพลาด", "ไม่สามารถอ่านไฟล์ CSV ได้ กรุณาตรวจสอบความถูกต้องของไฟล์", 'error');
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -264,7 +312,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
       const freshStudents = await api.getStudentsByClass(selectedClassId, true);
 
       if (!freshStudents.length) {
-        alert("ไม่มีข้อมูลนักเรียนที่จะส่งออก");
+        showAlert("ไม่มีข้อมูล", "ไม่มีข้อมูลนักเรียนที่จะส่งออก", 'info');
         return;
       }
 
@@ -311,7 +359,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
       }, 100);
 
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาดในการส่งออก: " + err.message);
+      showAlert("เกิดข้อผิดพลาด", "ไม่สามารถส่งออกไฟล์ได้: " + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -403,7 +451,7 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
                     <td className="px-6 py-4 text-sm font-medium text-gray-600">{s.id}</td>
                     <td className="px-6 py-4 text-sm font-bold text-gray-800">{s.name}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {s.dob ? new Date(s.dob).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : '-'}
+                      {formatDisplayDate(s.dob)}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       <div className="font-medium text-gray-800">{s.parentName || '-'}</div>
@@ -488,10 +536,9 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">วันเดือนปีเกิด</label>
-                <input
-                  type="date"
+                <ThaiDatePicker
                   value={dob}
-                  onChange={e => setDob(e.target.value)}
+                  onChange={val => setDob(val)}
                   className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
                 />
               </div>
@@ -583,6 +630,13 @@ const ManageStudents: React.FC<ManageStudentsProps> = ({ setLoading }) => {
         onClose={() => setSuccessModalOpen(false)}
         title="นำเข้าข้อมูลสำเร็จ"
         message={successModalMessage}
+      />
+      <AlertModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
       />
     </div>
   );

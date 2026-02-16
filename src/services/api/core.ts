@@ -112,7 +112,7 @@ export const getSettings = async () => {
     const { initPromise: promise } = await import('./state');
     if (promise) await promise;
 
-    await delay(300);
+
     try {
         const { data: supabaseSettings, error } = await supabase
             .from('settings')
@@ -135,7 +135,7 @@ export const updateSettings = async (data: any) => {
     const { initPromise: promise } = await import('./state');
     if (promise) await promise;
 
-    await delay(500);
+
     const newSettings = { ...systemSettings, ...data };
 
     // Upsert settings in Supabase

@@ -12,6 +12,7 @@ interface ParentDashboardProps {
 }
 
 const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
+    const isParent = user?.role === 'parent';
     const { studentId } = useParams<{ studentId: string }>();
     const navigate = useNavigate();
 
@@ -90,9 +91,12 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
     };
 
     const getStatus = (assignment: Assignment, score: number | null) => {
-        if (score !== null) return { label: 'ตรวจแล้ว', color: 'bg-emerald-100 text-emerald-700' };
+        if (score !== null) {
+            if (isParent) return { label: 'ส่งแล้ว ✓', color: 'bg-emerald-100 text-emerald-700' };
+            return { label: 'ตรวจแล้ว', color: 'bg-emerald-100 text-emerald-700' };
+        }
         if (isOverdue(assignment.dueDate)) return { label: 'ค้างส่ง', color: 'bg-red-100 text-red-700' };
-        return { label: 'รอดำเนินการ', color: 'bg-gray-100 text-gray-600' };
+        return { label: 'ยังไม่ส่ง', color: 'bg-gray-100 text-gray-600' };
     };
 
     const getTodayStatusLabel = (status: string) => {
@@ -255,28 +259,38 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
 
                                                             <div>
                                                                 <div className="flex justify-between items-end mb-1.5">
-                                                                    {isChecklist ? (
-                                                                        <div className="text-xs font-medium text-gray-600">สถานะ:</div>
-                                                                    ) : (
-                                                                        <div className="text-xs font-medium text-gray-600">คะแนน:</div>
-                                                                    )}
+                                                                    <div className="text-xs font-medium text-gray-600">
+                                                                        {isParent ? 'สถานะ:' : isChecklist ? 'สถานะ:' : 'คะแนน:'}
+                                                                    </div>
 
-                                                                    {score !== null && !isChecklist && (
-                                                                        <div className="text-sm font-bold text-gray-800">
-                                                                            {score} <span className="text-[10px] text-gray-400 font-normal">/ {a.maxScore}</span>
+                                                                    {isParent ? (
+                                                                        /* ผู้ปกครอง: แสดงแค่สถานะส่ง/ยังไม่ส่ง */
+                                                                        <div className={`text-xs font-bold flex items-center gap-1 ${score !== null ? 'text-emerald-500' : 'text-gray-400'}`}>
+                                                                            {score !== null
+                                                                                ? <><i className="fa-solid fa-check-circle"></i> ส่งแล้ว</>
+                                                                                : 'ยังไม่ส่ง'}
                                                                         </div>
-                                                                    )}
-                                                                    {isChecklist && (
-                                                                        <div className={`text-xs font-bold flex items-center gap-1 ${score === 1 ? 'text-emerald-500' : 'text-gray-400'}`}>
-                                                                            {score === 1 ? <><i className="fa-solid fa-check-circle"></i> ส่งแล้ว</> : 'ยังไม่ส่ง'}
-                                                                        </div>
-                                                                    )}
-                                                                    {score === null && (
-                                                                        <span className="text-xs text-gray-400">-</span>
+                                                                    ) : (
+                                                                        /* ครู: แสดงคะแนนปกติ */
+                                                                        <>
+                                                                            {score !== null && !isChecklist && (
+                                                                                <div className="text-sm font-bold text-gray-800">
+                                                                                    {score} <span className="text-[10px] text-gray-400 font-normal">/ {a.maxScore}</span>
+                                                                                </div>
+                                                                            )}
+                                                                            {isChecklist && (
+                                                                                <div className={`text-xs font-bold flex items-center gap-1 ${score === 1 ? 'text-emerald-500' : 'text-gray-400'}`}>
+                                                                                    {score === 1 ? <><i className="fa-solid fa-check-circle"></i> ส่งแล้ว</> : 'ยังไม่ส่ง'}
+                                                                                </div>
+                                                                            )}
+                                                                            {score === null && (
+                                                                                <span className="text-xs text-gray-400">-</span>
+                                                                            )}
+                                                                        </>
                                                                     )}
                                                                 </div>
 
-                                                                {score !== null && !isChecklist && (
+                                                                {!isParent && score !== null && !isChecklist && (
                                                                     <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
                                                                         <div
                                                                             className={`h-1 rounded-full ${percent >= 80 ? 'bg-emerald-500' : percent >= 50 ? 'bg-yellow-400' : 'bg-red-400'}`}
@@ -323,7 +337,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-3">
-                                                                    {score !== null && (
+                                                                    {!isParent && score !== null && (
                                                                         <div className="text-right">
                                                                             <div className="text-lg font-bold text-gray-800">
                                                                                 {score} <span className="text-sm text-gray-400 font-normal">/ {a.maxScore}</span>
@@ -336,7 +350,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ user, onBack }) => {
                                                                 </div>
                                                             </div>
 
-                                                            {score !== null && (
+                                                            {!isParent && score !== null && (
                                                                 <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
                                                                     <div
                                                                         className={`h-1.5 rounded-full ${percent >= 80 ? 'bg-emerald-500' : percent >= 50 ? 'bg-yellow-400' : 'bg-red-400'}`}

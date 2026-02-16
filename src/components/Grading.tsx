@@ -5,6 +5,7 @@ import { Classroom, Assignment, Student, Grade } from '../types';
 
 import { SuccessModal } from './ui/SuccessModal';
 import { ConfirmModal } from './ui/ConfirmModal';
+import ThaiDatePicker from './ui/ThaiDatePicker';
 
 interface GradingProps {
   setLoading: (l: boolean) => void;
@@ -690,10 +691,9 @@ const Grading: React.FC<GradingProps> = ({ setLoading }) => {
               )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">กำหนดส่ง</label>
-                <input
-                  type="date"
+                <ThaiDatePicker
                   value={newDueDate}
-                  onChange={e => setNewDueDate(e.target.value)}
+                  onChange={val => setNewDueDate(val)}
                   className="w-full rounded-xl border border-gray-300 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 p-2.5 outline-none"
                 />
               </div>
